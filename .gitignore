@@ -12,8 +12,22 @@ coverage/
 *.sock
 *.pid
 *.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
 *.db
+*.db-wal
+*.db-shm
+*.log
 audit.log
 .signing_key
 .env
 .env.*
+.envrc
+.direnv/
+
+# Project-local agent continuity (keep local)
+.agents/sessions/
+.agents/contexts/state.md
+.agents/contexts/research-index.md
+.agents/contexts/session-index.md

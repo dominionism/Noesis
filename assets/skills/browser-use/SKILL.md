@@ -593,14 +593,14 @@ browser-use -b real profile list          # List local Chrome profiles
 
 ```bash
 browser-use -b real profile list
-# Output: Default: Person 1 (user@gmail.com)
-#         Profile 1: Work (work@company.com)
+# Output: Default: Person 1 (user@example.com)
+#         Profile 1: Work (work@example.org)
 
 # With a specific profile (has that profile's cookies/logins)
-browser-use --browser real --profile "Profile 1" open https://gmail.com
+browser-use --browser real --profile "Profile 1" open https://example.com
 
 # Without a profile (fresh browser, no existing logins)
-browser-use --browser real open https://gmail.com
+browser-use --browser real open https://example.com
 
 # Headless mode (no visible window) - useful for cookie export
 browser-use --browser real --profile "Default" cookies export /tmp/cookies.json
@@ -642,8 +642,8 @@ browser-use --browser remote --profile abc-123 open https://example.com
 ```bash
 # List local Chrome profiles
 browser-use -b real profile list
-# → Default: Person 1 (user@gmail.com)
-# → Profile 1: Work (work@company.com)
+# → Default: Person 1 (user@example.com)
+# → Profile 1: Work (work@example.org)
 
 # See what cookies are in a profile
 browser-use -b real profile cookies "Default"
@@ -777,7 +777,7 @@ browser-use python "print(f'Captured {len(products)} products')"
 
 ### Using Real Browser (Logged-In Sessions)
 ```bash
-browser-use --browser real open https://gmail.com
+browser-use --browser real open https://example.com
 # Uses your actual Chrome with existing login sessions
 browser-use state  # Already logged in!
 ```

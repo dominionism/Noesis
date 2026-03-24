@@ -110,7 +110,7 @@ describe('scanForSecrets', () => {
     });
 
     it('detects MongoDB connection strings', () => {
-      const text = 'MONGO_URI=mongodb://user:password123@mongo.host.com/dbname';
+      const text = 'MONGO_URI=mongodb://user:password123@mongo.example.com/dbname';
       const matches = scanForSecrets(text);
       expect(matches.some(m => m.type === 'connection_string')).toBe(true);
     });

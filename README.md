@@ -190,6 +190,7 @@ The default LLM-backed synthesis path uses an Anthropic model, and the API key i
 - [docs/ADAPTERS.md](docs/ADAPTERS.md): adapter model and sync behavior
 - [docs/CAPSULES.md](docs/CAPSULES.md): task-class operating packs
 - [docs/CONFIGURATION.md](docs/CONFIGURATION.md): configuration reference
+- [docs/PUBLISHING.md](docs/PUBLISHING.md): privacy-safe GitHub publishing checklist
 - [docs/SECURITY.md](docs/SECURITY.md): security invariants and threat model
 - [CONTRIBUTING.md](CONTRIBUTING.md): development workflow and contribution standards
 

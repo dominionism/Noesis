@@ -147,7 +147,7 @@ interface CreateUserInput {
 function createUser(input: CreateUserInput) { ... }
 
 // Call site is now self-documenting:
-createUser({ name: 'Alice', email: 'alice@co.com', role: 'engineer', ... });
+createUser({ name: 'Alice', email: 'alice@example.com', role: 'engineer', ... });
 ```
 
 ## Pattern: Replace Magic Values with Named Constants
