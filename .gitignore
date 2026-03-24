@@ -1,0 +1,19 @@
+node_modules/
+dist/
+*.js
+*.d.ts
+*.js.map
+*.d.ts.map
+!vitest.config.ts
+.DS_Store
+coverage/
+
+# Runtime state (never commit)
+*.sock
+*.pid
+*.sqlite
+*.db
+audit.log
+.signing_key
+.env
+.env.*

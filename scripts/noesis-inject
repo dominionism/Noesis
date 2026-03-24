@@ -1,0 +1,465 @@
+#!/usr/bin/env node
+
+// noesis-inject -- Inject Noesis intelligence context into agent instruction files.
+//
+// Detects which AI coding agents are present in the current project directory
+// and writes a managed section of Noesis context into each agent's instruction
+// file (CLAUDE.md for Claude Code, AGENTS.md for Codex/OpenCode).
+//
+// Usage:
+//   noesis-inject                    # inject into CWD
+//   noesis-inject --project owner/repo  # explicit project scope
+//   noesis-inject --global           # also update ~/.claude/CLAUDE.md
+
+const net = require("net");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const { spawn, execSync, execFileSync } = require("child_process");
+
+const SOCKET_PATH = path.join(os.homedir(), ".agents", "daemon.sock");
+const CONNECT_TIMEOUT_MS = 3000;
+const RPC_TIMEOUT_MS = 15000;
+const DAEMON_SPAWN_TIMEOUT_MS = 15000;
+const DAEMON_POLL_INTERVAL_MS = 200;
+
+const MANAGED_BEGIN = "<!-- NOESIS:BEGIN -->";
+const MANAGED_END = "<!-- NOESIS:END -->";
+
+// ── Socket / RPC ────────────────────────────────────────────────
+
+let rpcIdCounter = 1;
+
+function connectToSocket(socketPath, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect({ path: socketPath });
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error("Socket connection timed out"));
+    }, timeoutMs);
+    socket.once("connect", () => { clearTimeout(timer); resolve(socket); });
+    socket.once("error", (err) => { clearTimeout(timer); reject(err); });
+  });
+}
+
+function rpcCall(socket, method, params, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const id = rpcIdCounter++;
+    const payload = JSON.stringify({ jsonrpc: "2.0", id, method, params: params || {} }) + "\n";
+    let buffer = "";
+    const timer = setTimeout(() => {
+      socket.removeAllListeners("data");
+      reject(new Error(`RPC '${method}' timed out`));
+    }, timeoutMs);
+    const onData = (chunk) => {
+      buffer += chunk.toString();
+      const nl = buffer.indexOf("\n");
+      if (nl === -1) return;
+      clearTimeout(timer);
+      socket.removeListener("data", onData);
+      const line = buffer.slice(0, nl);
+      try {
+        const resp = JSON.parse(line);
+        if (resp.error) reject(new Error(resp.error.message || JSON.stringify(resp.error)));
+        else resolve(resp.result);
+      } catch (e) { reject(new Error(`RPC parse error: ${e.message}`)); }
+    };
+    socket.on("data", onData);
+    socket.once("error", (err) => { clearTimeout(timer); reject(err); });
+    socket.write(payload);
+  });
+}
+
+async function callNoesis(method, params) {
+  const socket = await connectToSocket(SOCKET_PATH, CONNECT_TIMEOUT_MS);
+  try { return await rpcCall(socket, method, params, RPC_TIMEOUT_MS); }
+  finally { socket.destroy(); }
+}
+
+function isIpcPermissionDenied(error) {
+  const message = String(error && error.message || error || "");
+  return /operation not permitted|permission denied|connect eperm|connect eacces/i.test(message);
+}
+
+function findNoesisCli() {
+  const pathDirs = (process.env.PATH || "").split(path.delimiter).filter(Boolean);
+  for (const dir of pathDirs) {
+    const candidate = path.join(dir, "noesis");
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch { /* skip */ }
+  }
+
+  return "noesis";
+}
+
+function callNoesisViaCli(taskDescription, projectId) {
+  const noesisBin = findNoesisCli();
+  const args = ["--json", "orchestrate", taskDescription, "--budget", "50000"];
+
+  if (projectId) {
+    args.push("--project", projectId);
+  }
+
+  const stdout = execFileSync(noesisBin, args, {
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  return JSON.parse(stdout);
+}
+
+// ── Daemon lifecycle ────────────────────────────────────────────
+
+function findDaemonScript() {
+  const envScript = process.env.NOESIS_DAEMON_SCRIPT;
+  if (envScript && fs.existsSync(envScript)) return envScript;
+  const pathDirs = (process.env.PATH || "").split(path.delimiter).filter(Boolean);
+  for (const dir of pathDirs) {
+    const candidate = path.join(dir, "noesis");
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      const resolved = fs.realpathSync(candidate);
+      let root = path.dirname(resolved);
+      for (let i = 0; i < 4; i++) {
+        const script = path.join(root, "dist", "daemon", "main.js");
+        if (fs.existsSync(script)) return script;
+        root = path.dirname(root);
+      }
+    } catch { /* skip */ }
+  }
+  const wellKnown = [
+    path.join(os.homedir(), "noesis", "dist", "daemon", "main.js"),
+    path.join(os.homedir(), ".local", "lib", "noesis", "dist", "daemon", "main.js"),
+  ];
+  for (const c of wellKnown) { if (fs.existsSync(c)) return c; }
+  return null;
+}
+
+async function ensureDaemon() {
+  if (fs.existsSync(SOCKET_PATH)) return true;
+  const script = findDaemonScript();
+  if (!script) return false;
+  const child = spawn(process.execPath, [script], {
+    detached: true, stdio: "ignore",
+    env: { ...process.env, NOESIS_DAEMON: "1" },
+  });
+  child.unref();
+  const deadline = Date.now() + DAEMON_SPAWN_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(SOCKET_PATH)) return true;
+    await new Promise((r) => setTimeout(r, DAEMON_POLL_INTERVAL_MS));
+  }
+  return false;
+}
+
+// ── Assembly rendering ──────────────────────────────────────────
+
+function renderRules(rules) {
+  if (!Array.isArray(rules) || rules.length === 0) return null;
+  const sorted = [...rules].sort((a, b) => {
+    const order = { hard: 0, soft: 1, advisory: 2 };
+    const ea = order[a.enforcement] ?? 3;
+    const eb = order[b.enforcement] ?? 3;
+    if (ea !== eb) return ea - eb;
+    return (b.confidence_score || 0) - (a.confidence_score || 0);
+  });
+  const lines = ["### Active Rules"];
+  for (const r of sorted) {
+    const conf = r.confidence_score != null ? ` (${Math.round(r.confidence_score * 100)}%)` : "";
+    lines.push(`#### ${r.name} [${r.enforcement || "soft"}]${conf}`);
+    if (r.description) lines.push(r.description);
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
+function renderExpert(expert) {
+  if (!expert) return null;
+  const lines = [`### Expert Guidance: ${expert.display_name || expert.name}`];
+  if (expert.role) lines.push(`**Role:** ${expert.role}`);
+  if (expert.domain) lines.push(`**Domain:** ${expert.domain}`);
+  if (Array.isArray(expert.deliverables) && expert.deliverables.length > 0) {
+    lines.push("**Deliverables:**");
+    for (const d of expert.deliverables) lines.push(`- ${d}`);
+  }
+  if (Array.isArray(expert.anti_patterns) && expert.anti_patterns.length > 0) {
+    lines.push("**Avoid:**");
+    for (const ap of expert.anti_patterns) lines.push(`- ${ap}`);
+  }
+  return lines.join("\n");
+}
+
+function renderMemories(memories) {
+  if (!Array.isArray(memories) || memories.length === 0) return null;
+  const lines = ["### Relevant Memories"];
+  for (const m of memories) {
+    const outcome = m.outcome ? ` [${m.outcome}]` : "";
+    const conf = m.confidence != null ? ` (${Math.round(m.confidence * 100)}%)` : "";
+    lines.push(`- **${m.title || "Untitled"}**${outcome}${conf}`);
+    if (m.content) lines.push(`  ${(m.content || "").slice(0, 200)}`);
+  }
+  return lines.join("\n");
+}
+
+function renderSkills(skills) {
+  if (!Array.isArray(skills) || skills.length === 0) return null;
+  const lines = ["### Available Skills"];
+  for (const s of skills) {
+    const cat = s.category ? ` (${s.category})` : "";
+    lines.push(`#### ${s.name}${cat}`);
+    if (s.description) lines.push(s.description);
+    if (Array.isArray(s.anti_patterns) && s.anti_patterns.length > 0) {
+      lines.push("**Avoid:**");
+      for (const ap of s.anti_patterns) lines.push(`- ${ap}`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
+function renderAssembly(assembly) {
+  if (!assembly || typeof assembly !== "object") return "";
+  const sections = [];
+
+  if (assembly.reasoning_scaffold) sections.push(assembly.reasoning_scaffold);
+
+  const decisions = (assembly.contexts || []).find((c) => c.context_type === "decisions");
+  if (decisions?.content) sections.push(`### Locked Decisions\n${decisions.content}`);
+
+  const rules = renderRules(assembly.rules);
+  if (rules) sections.push(rules);
+
+  const expert = renderExpert(assembly.expert);
+  if (expert) sections.push(expert);
+
+  if (assembly.capsule) {
+    const def = assembly.capsule.definition || assembly.capsule;
+    const lines = [`### Task Class: ${def.display_name || def.name || "Unknown"}`];
+    if (def.description) lines.push(def.description);
+    const components = assembly.capsule.components || {};
+    for (const key of ["intent", "anti_patterns", "critic", "assembly", "examples"]) {
+      const comp = components[key];
+      if (comp?.content) {
+        lines.push("");
+        lines.push(`#### ${key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}`);
+        lines.push(comp.content);
+      }
+    }
+    sections.push(lines.join("\n"));
+  }
+
+  const failures = (assembly.contexts || []).find((c) => c.context_type === "failure_patterns");
+  if (failures?.content) sections.push(`### Failure Predictions\n${failures.content}`);
+
+  const memories = renderMemories(assembly.memories);
+  if (memories) sections.push(memories);
+
+  const otherCtx = (assembly.contexts || []).filter(
+    (c) => c.context_type !== "decisions" && c.context_type !== "failure_patterns",
+  );
+  if (otherCtx.length > 0) {
+    const lines = ["### Project Context"];
+    for (const ctx of otherCtx) {
+      const label = (ctx.context_type || "context").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+      lines.push(`#### ${label}`);
+      if (ctx.content) lines.push(ctx.content);
+      lines.push("");
+    }
+    sections.push(lines.join("\n"));
+  }
+
+  const skills = renderSkills(assembly.skills);
+  if (skills) sections.push(skills);
+
+  return sections.join("\n\n");
+}
+
+// ── Managed section injection ───────────────────────────────────
+
+function buildManagedContent(assemblyMarkdown, timestamp) {
+  return [
+    MANAGED_BEGIN,
+    `<!-- updated: ${timestamp} | do not edit manually — run noesis-inject to refresh -->`,
+    "",
+    "## Noesis Intelligence Context",
+    "",
+    "This section is auto-generated by Noesis,",
+    "a persistent intelligence layer for AI coding agents. It provides cognitive",
+    "context (rules, expert guidance, memories, skills) to improve your work.",
+    "",
+    "### Noesis CLI (available on PATH)",
+    "",
+    "You have access to these commands during your session:",
+    "",
+    "| Command | Purpose |",
+    "|---------|---------|",
+    "| `noesis recall \"<query>\"` | Search for relevant memories and knowledge |",
+    "| `noesis remember <type> \"<title>\" --content \"<content>\"` | Store a new memory (types: lesson, decision, preference, pattern, correction) |",
+    "| `noesis plan create \"<description>\"` | Create a structured plan for a task |",
+    "| `noesis learn --description \"<what>\" --root-cause \"<why>\" --prevention \"<how>\"` | Record a learning from a failure |",
+    "| `noesis check \"<action>\"` | Check an action against known anti-patterns |",
+    "| `noesis research \"<topic>\"` | Deep research on a topic |",
+    "| `noesis critique \"<approach>\"` | Get critical analysis of an approach |",
+    "",
+    "Use `noesis recall` when you need domain-specific knowledge, past decisions,",
+    "or lessons learned. Use `noesis remember` and `noesis learn` to record",
+    "important outcomes, decisions, and learnings after completing work.",
+    "If `noesis remember` reports a near-duplicate, use `--force` to store anyway.",
+    "",
+    "### Session Context",
+    "",
+    assemblyMarkdown,
+    "",
+    MANAGED_END,
+  ].join("\n");
+}
+
+function injectIntoFile(filePath, managedContent) {
+  let existing = "";
+  try { existing = fs.readFileSync(filePath, "utf-8"); } catch { /* new file */ }
+
+  const beginIdx = existing.indexOf(MANAGED_BEGIN);
+  const endIdx = existing.indexOf(MANAGED_END);
+
+  let updated;
+  if (beginIdx !== -1 && endIdx !== -1) {
+    updated = existing.slice(0, beginIdx) + managedContent + existing.slice(endIdx + MANAGED_END.length);
+  } else {
+    const separator = existing.trim() ? "\n\n" : "";
+    updated = existing + separator + managedContent + "\n";
+  }
+
+  fs.writeFileSync(filePath, updated, { mode: 0o644 });
+}
+
+// ── Project detection ───────────────────────────────────────────
+
+function detectProjectId() {
+  try {
+    const remote = execSync("git remote get-url origin 2>/dev/null", { encoding: "utf-8" }).trim();
+    // Extract owner/repo from SSH or HTTPS URLs
+    const match = remote.match(/[:/]([^/]+\/[^/.]+?)(?:\.git)?$/);
+    if (match) return match[1];
+  } catch { /* not a git repo or no remote */ }
+  return null;
+}
+
+function detectAgents(dir) {
+  const agents = [];
+
+  // Claude Code: detect via .claude dir, CLAUDE.md, or claude binary on PATH
+  const hasClaudeDir = fs.existsSync(path.join(dir, ".claude"));
+  const hasClaudeMd = fs.existsSync(path.join(dir, "CLAUDE.md"));
+  const hasClaudeGlobal = fs.existsSync(path.join(os.homedir(), ".claude"));
+  if (hasClaudeDir || hasClaudeMd || hasClaudeGlobal) {
+    agents.push({ id: "claude-code", file: path.join(dir, "CLAUDE.md") });
+  }
+
+  // Codex: detect via ~/.codex directory
+  const hasCodex = fs.existsSync(path.join(os.homedir(), ".codex"));
+  // OpenCode: detect via ~/.opencode or ~/.config/opencode
+  const hasOpenCode = fs.existsSync(path.join(os.homedir(), ".opencode"))
+    || fs.existsSync(path.join(os.homedir(), ".config", "opencode"));
+  // AGENTS.md: only if project already has it, or Codex/OpenCode are installed
+  const hasAgentsMd = fs.existsSync(path.join(dir, "AGENTS.md"));
+  if (hasCodex || hasOpenCode || hasAgentsMd) {
+    agents.push({ id: "codex-opencode", file: path.join(dir, "AGENTS.md") });
+  }
+
+  return agents;
+}
+
+// ── Main ────────────────────────────────────────────────────────
+
+async function main() {
+  const args = process.argv.slice(2);
+  const globalFlag = args.includes("--global");
+  let projectId = null;
+
+  const projectIdx = args.indexOf("--project");
+  if (projectIdx !== -1 && args[projectIdx + 1]) {
+    projectId = args[projectIdx + 1];
+  }
+
+  if (!projectId) {
+    projectId = detectProjectId();
+  }
+
+  // Query Noesis for context
+  const taskDescription = projectId
+    ? `Provide comprehensive intelligence context for work on ${projectId}`
+    : "Provide comprehensive intelligence context for the current project";
+
+  let assembly;
+  try {
+    const daemonReady = await ensureDaemon();
+    if (!daemonReady) {
+      throw new Error("Could not start Noesis daemon");
+    }
+
+    assembly = await callNoesis("noesis.orchestrate", {
+      request: taskDescription,
+      project_id: projectId,
+      token_budget: 50000,
+    });
+  } catch (err) {
+    try {
+      assembly = callNoesisViaCli(taskDescription, projectId);
+    } catch (cliErr) {
+      const primary = String(err && err.message || err || "unknown error");
+      const fallback = String(cliErr && cliErr.message || cliErr || "unknown error");
+      const detail = isIpcPermissionDenied(err)
+        ? `${primary} (daemon IPC blocked; CLI fallback also failed)`
+        : `${primary} (CLI fallback also failed)`;
+      console.error(`Error querying Noesis: ${detail}`);
+      console.error(`Fallback error: ${fallback}`);
+      process.exit(1);
+    }
+  }
+
+  const markdown = renderAssembly(assembly);
+  if (!markdown) {
+    console.log("Noesis returned no context. The knowledge base may be empty.");
+    return;
+  }
+
+  const timestamp = new Date().toISOString();
+  const managedContent = buildManagedContent(markdown, timestamp);
+  const cwd = process.cwd();
+
+  // Detect agents in current directory
+  const agents = detectAgents(cwd);
+
+  if (agents.length === 0) {
+    console.log("No AI coding agents detected. Creating CLAUDE.md by default.");
+    agents.push({ id: "claude-code", file: path.join(cwd, "CLAUDE.md") });
+  }
+
+  const injected = [];
+
+  // Inject into each detected agent's instruction file
+  for (const agent of agents) {
+    injectIntoFile(agent.file, managedContent);
+    injected.push(agent.file);
+  }
+
+  // Global CLAUDE.md
+  if (globalFlag) {
+    const globalClaude = path.join(os.homedir(), ".claude", "CLAUDE.md");
+    injectIntoFile(globalClaude, managedContent);
+    injected.push(globalClaude);
+  }
+
+  const contextLength = markdown.length;
+  console.log(`Noesis context injected (${contextLength} chars, project: ${projectId || "auto"})`);
+  for (const f of injected) {
+    console.log(`  -> ${f}`);
+  }
+}
+
+main().catch((err) => {
+  console.error(`Fatal: ${err.message}`);
+  process.exit(1);
+});
