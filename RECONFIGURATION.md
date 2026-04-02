@@ -7,7 +7,12 @@ Scope:
 - Restores the Noesis codebase and workflow mechanism
 - Recreates a fresh `~/.agents` home
 - Reinstates the shell wrappers that auto-inject Noesis context into `codex`, `claude`, `opencode`, and `kilocode`
-- Does not restore prior memories unless you separately import or copy them
+- Restores prior memories if you import the repo-backed export file in `backups/noesis-memory-export.json`
+
+Important:
+
+- This repo now contains a committed Noesis memory export at `backups/noesis-memory-export.json`
+- If you want those memories to remain private, keep the repository private
 
 ## 1. Install Machine Prerequisites
 
@@ -78,7 +83,29 @@ node /Users/dominion/noesis/dist/cli/index.js quickstart
 
 This creates a fresh `~/.agents` home with the Noesis database, config, signing key, models directory, hooks directory, and other runtime state.
 
-## 5. Restore The Shell Integration
+## 5. Import The Backed-Up Memories
+
+The repo includes a committed Noesis export here:
+
+```bash
+/Users/dominion/noesis/backups/noesis-memory-export.json
+```
+
+Import it into the fresh local Noesis database:
+
+```bash
+node /Users/dominion/noesis/dist/cli/index.js import /Users/dominion/noesis/backups/noesis-memory-export.json
+```
+
+After import, verify:
+
+```bash
+node /Users/dominion/noesis/dist/cli/index.js recall "Noesis"
+```
+
+If you intentionally want a fresh memory state, skip this section.
+
+## 6. Restore The Shell Integration
 
 Open your `~/.zshrc`:
 
@@ -175,7 +202,7 @@ If your Noesis repo lives somewhere other than `/Users/dominion/noesis`, replace
 - `noesis()`
 - `_noesis_inject()`
 
-## 6. Reload The Shell
+## 7. Reload The Shell
 
 ```bash
 source ~/.zshrc
@@ -188,7 +215,7 @@ which node
 type noesis
 ```
 
-## 7. Verify Noesis Is Working
+## 8. Verify Noesis Is Working
 
 Run these checks:
 
@@ -205,7 +232,7 @@ Expected outcomes:
 - `noesis recall "test"` runs successfully, even if it finds little or nothing in a fresh install
 - `noesis-inject` completes without error
 
-## 8. Reinstall Your Agent CLIs
+## 9. Reinstall Your Agent CLIs
 
 Your wrapper functions assume these commands already exist on `PATH`:
 
@@ -216,7 +243,7 @@ Your wrapper functions assume these commands already exist on `PATH`:
 
 Reinstall whichever ones you actually use on the reset Mac. Noesis wraps those commands; it does not install them for you.
 
-## 9. Quick End-To-End Check
+## 10. Quick End-To-End Check
 
 In any git repo that has a `Context/AGENTS.md` or `Context/CLAUDE.md`, try launching an agent through the wrapper:
 
@@ -237,24 +264,24 @@ The wrapper should:
 - launch the agent
 - remove the temporary bridge after the command exits
 
-## 10. What You Will And Will Not Get Back
+## 11. What You Will And Will Not Get Back
 
 What this guide restores:
 
 - the pushed Noesis codebase
 - the CLI and daemon build
+- the repo-backed exported memories, if you run the import step
 - the shell-based Noesis workflow
 - fresh Noesis runtime state under `~/.agents`
 
 What this guide does not restore automatically:
 
-- your previous Noesis memories
 - your previous database contents
 - any old `~/.agents` custom state you did not separately back up
 
-That is acceptable for your stated goal because the mechanism is what you wanted preserved.
+With the committed export file plus the import step above, your prior memories can also be restored into the fresh machine.
 
-## 11. Minimal Recovery Command List
+## 12. Minimal Recovery Command List
 
 If you just want the shortest useful sequence:
 
@@ -271,11 +298,12 @@ npm install
 npm run build
 node /Users/dominion/noesis/dist/cli/index.js init
 node /Users/dominion/noesis/dist/cli/index.js quickstart
+node /Users/dominion/noesis/dist/cli/index.js import /Users/dominion/noesis/backups/noesis-memory-export.json
 source ~/.zshrc
 noesis status
 ```
 
-## 12. Recommended After Restore
+## 13. Recommended After Restore
 
 Once everything is working, create a backup of your fresh setup so future recovery is faster:
 
