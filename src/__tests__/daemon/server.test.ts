@@ -23,16 +23,56 @@ function makeTempDir(): string {
 // and verifying the state machine transitions.
 
 // Create mocks using vi.hoisted() to avoid TDZ issues with vi.mock hoisting
-const { mockDbInstance, mockCreateSocket, mockDestroySocket } = vi.hoisted(() => ({
+const {
+  mockPreparedStatement,
+  mockDbInstance,
+  mockCreateSocket,
+  mockDestroySocket,
+  mockSeedBuiltInRules,
+  mockSeedBuiltInExperts,
+  mockSeedBuiltInCapsules,
+  mockSeedBuiltInSkills,
+  mockSeedBuiltInContexts,
+  mockSeedBuiltInCommands,
+  mockRegisterMarkdownAssets,
+  mockEmbedSeededEntities,
+} = vi.hoisted(() => ({
+  mockPreparedStatement: {
+    run: vi.fn(),
+    get: vi.fn(),
+    all: vi.fn(),
+  },
   mockDbInstance: {
     pragma: vi.fn().mockReturnValue([{ integrity_check: 'ok' }]),
+    prepare: vi.fn(),
     exec: vi.fn(),
     isOpen: true,
     close: vi.fn(),
   },
   mockCreateSocket: vi.fn(),
   mockDestroySocket: vi.fn().mockResolvedValue(undefined),
+  mockSeedBuiltInRules: vi.fn().mockReturnValue(2),
+  mockSeedBuiltInExperts: vi.fn().mockReturnValue(1),
+  mockSeedBuiltInCapsules: vi.fn().mockReturnValue(1),
+  mockSeedBuiltInSkills: vi.fn().mockReturnValue(1),
+  mockSeedBuiltInContexts: vi.fn().mockReturnValue(1),
+  mockSeedBuiltInCommands: vi.fn(),
+  mockRegisterMarkdownAssets: vi.fn().mockResolvedValue({
+    experts: { registered: 0, updated: 0, errors: 0 },
+    skills: { registered: 0, updated: 0, errors: 0 },
+    rules: { registered: 0, updated: 0, errors: 0 },
+    capsules: { registered: 0, updated: 0, errors: 0 },
+  }),
+  mockEmbedSeededEntities: vi.fn().mockResolvedValue({
+    rules: 0,
+    experts: 0,
+    capsules: 0,
+    skills: 0,
+    errors: 0,
+  }),
 }));
+
+mockDbInstance.prepare.mockReturnValue(mockPreparedStatement);
 
 vi.mock('../../core/database.js', () => ({
   DatabaseConnection: {
@@ -64,6 +104,39 @@ vi.mock('../../embedding/arctic.js', () => ({}));
 vi.mock('../../security/hmac.js', () => ({
   loadSigningKey: vi.fn().mockReturnValue(Buffer.alloc(32)),
   generateSigningKey: vi.fn().mockReturnValue(Buffer.alloc(32)),
+  signContent: vi.fn().mockReturnValue('signature'),
+}));
+
+vi.mock('../../cognitive/rules/built-in-rules.js', () => ({
+  seedBuiltInRules: mockSeedBuiltInRules,
+}));
+
+vi.mock('../../cognitive/experts/built-in-experts.js', () => ({
+  seedBuiltInExperts: mockSeedBuiltInExperts,
+}));
+
+vi.mock('../../cognitive/capsules/built-in-capsules.js', () => ({
+  seedBuiltInCapsules: mockSeedBuiltInCapsules,
+}));
+
+vi.mock('../../cognitive/skills/built-in-skills.js', () => ({
+  seedBuiltInSkills: mockSeedBuiltInSkills,
+}));
+
+vi.mock('../../cognitive/context/built-in-contexts.js', () => ({
+  seedBuiltInContexts: mockSeedBuiltInContexts,
+}));
+
+vi.mock('../../cognitive/commands/built-in-commands.js', () => ({
+  seedBuiltInCommands: mockSeedBuiltInCommands,
+}));
+
+vi.mock('../../assets/registry.js', () => ({
+  registerMarkdownAssets: mockRegisterMarkdownAssets,
+}));
+
+vi.mock('../../cognitive/embed-seeded-entities.js', () => ({
+  embedSeededEntities: mockEmbedSeededEntities,
 }));
 
 // Mock the constants to use temp paths
@@ -117,6 +190,7 @@ describe('daemon/server', () => {
 
     // Restore default mock implementations after clearAllMocks
     mockDbInstance.pragma.mockReturnValue([{ integrity_check: 'ok' }]);
+    mockDbInstance.prepare.mockReturnValue(mockPreparedStatement);
 
     // Set up mockCreateSocket to create a fake server
     mockCreateSocket.mockImplementation(async () => {
@@ -169,6 +243,31 @@ describe('daemon/server', () => {
       await startDaemon();
 
       expect(DatabaseConnection.getInstance).toHaveBeenCalled();
+    });
+
+    it('initializes cognitive modules through the healthy startup path', async () => {
+      const { DatabaseConnection } = await import('../../core/database.js');
+      const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+      try {
+        await startDaemon();
+
+        expect(DatabaseConnection.getInstance).toHaveBeenCalledTimes(1);
+        expect(mockSeedBuiltInRules).toHaveBeenCalledWith(mockDbInstance, expect.any(Function));
+        expect(mockSeedBuiltInExperts).toHaveBeenCalledWith(mockDbInstance, expect.any(Function));
+        expect(mockSeedBuiltInCapsules).toHaveBeenCalledWith(mockDbInstance, expect.any(Function));
+        expect(mockSeedBuiltInSkills).toHaveBeenCalledWith(mockDbInstance, expect.any(Function));
+        expect(mockSeedBuiltInContexts).toHaveBeenCalledWith(mockDbInstance, expect.any(Function));
+        expect(mockSeedBuiltInCommands).toHaveBeenCalledWith(mockDbInstance, expect.any(Function));
+        expect(mockRegisterMarkdownAssets).toHaveBeenCalledWith(mockDbInstance, expect.any(Function));
+        expect(mockEmbedSeededEntities).toHaveBeenCalledWith(mockDbInstance, expect.any(Function));
+
+        const stderrOutput = stderrSpy.mock.calls.map(([chunk]) => String(chunk));
+        expect(stderrOutput.some(line => line.includes('db.prepare is not a function'))).toBe(false);
+        expect(stderrOutput.some(line => line.includes('Continuing without cognitive seeding'))).toBe(false);
+      } finally {
+        stderrSpy.mockRestore();
+      }
     });
 
     it('creates a socket server', async () => {

@@ -335,7 +335,7 @@ export function assembleContext(
 /**
  * Enhanced context assembly with cognitive entities.
  *
- * Priority order (from INTELLIGENCE.md):
+ * Priority order:
  * decisions → rules → expert → capsule → failure_patterns → memories → skills → contexts → anti_patterns
  *
  * Falls back to legacy assembleContext when no enrichment is provided.
@@ -439,6 +439,8 @@ export function buildFileWrite(
     managedSection: useManagedSection,
     adapterId,
     hash: hashContent(content),
+    rawContent: content,
+    version,
   };
 }
 

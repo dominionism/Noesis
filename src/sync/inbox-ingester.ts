@@ -1,12 +1,15 @@
 /**
- * Inbox Ingester
+ * Inbox Ingestion Helpers
  *
- * Ingests write-back content from adapter inboxes and converts it
- * into structured memory inputs for storage.
+ * Parses write-back content from adapter inboxes into structured
+ * learning candidates.
  *
- * Each adapter that supports write-back drops content in a known
- * inbox location. The ingester scans all inboxes, parses content,
- * and creates memory entries.
+ * The live persistence path is implemented by the sync orchestrator,
+ * which calls these helpers and then runs the write pipeline. This
+ * module deliberately stays lightweight: parsing, entry creation, and
+ * basic accounting for unit tests and dry analysis flows. Parsed
+ * `correction` blocks are an intermediate classification only; the live
+ * write path normalizes them into persisted lesson memories.
  */
 
 import { generateId } from '../core/ulid.js';
@@ -92,7 +95,10 @@ export function createInboxEntry(
 }
 
 /**
- * Process a batch of inbox entries.
+ * Process a batch of inbox entries for parsing/accounting only.
+ *
+ * This helper does not persist memories; production persistence happens
+ * in the sync orchestrator after classification.
  */
 export function processInboxEntries(entries: InboxEntry[]): IngestResult {
   let entriesProcessed = 0;

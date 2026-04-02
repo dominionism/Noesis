@@ -623,7 +623,7 @@ describe('NoesisClient', () => {
 
       await client.checkAction('delete database', 'proj-1');
 
-      expect(capturedMethod).toBe('noesis.check_action');
+      expect(capturedMethod).toBe('noesis.checkAction');
       expect(capturedParams).toEqual({
         action: 'delete database',
         project_id: 'proj-1',
@@ -665,7 +665,7 @@ describe('NoesisClient', () => {
         agent: 'claude',
       });
 
-      expect(capturedMethod).toBe('noesis.session_start');
+      expect(capturedMethod).toBe('noesis.sessionStart');
       expect(capturedParams).toMatchObject({
         project_id: 'proj-1',
         agent: 'claude',
@@ -713,7 +713,7 @@ describe('NoesisClient', () => {
 
       const result = await client.sessionList({ project_id: 'proj-1', limit: 5 });
 
-      expect(capturedMethod).toBe('noesis.session_list');
+      expect(capturedMethod).toBe('noesis.sessionList');
       expect(result).toEqual([]);
     });
 

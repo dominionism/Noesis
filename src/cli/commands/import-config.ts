@@ -1,13 +1,13 @@
 /**
  * noesis import-config — Import from existing tool configurations
  *
- * Scans for known tool config files (Claude Code CLAUDE.md, Cursor rules,
- * Aider config, Codex AGENTS.md) and imports relevant learnings into
- * Noesis memories via the daemon's noesis.remember RPC method.
+ * Scans for known tool config and instruction files across the currently
+ * supported adapter surface, then imports relevant learnings into Noesis
+ * memories via the daemon's noesis.remember RPC method.
  */
 
 import { Command } from 'commander';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createClient } from '../../daemon/client.js';
@@ -21,17 +21,36 @@ interface ToolConfig {
   id: string;
   /** Human-readable name */
   name: string;
-  /** Candidate file paths (absolute). Resolved at scan time. */
+  /** Candidate config or instruction paths (absolute). */
   paths: string[];
 }
 
-function getToolConfigs(scanDir: string): ToolConfig[] {
+export const SUPPORTED_IMPORT_TOOLS = [
+  'claude-code',
+  'cursor',
+  'copilot',
+  'aider',
+  'codex-cli',
+  'opencode',
+  'antigravity',
+  'openclaw',
+  'generic',
+] as const;
+
+export function getToolConfigs(scanDir: string): ToolConfig[] {
   const home = homedir();
   return [
     {
       id: 'claude-code',
       name: 'Claude Code',
-      paths: [join(home, '.claude', 'CLAUDE.md')],
+      paths: [
+        join(scanDir, 'CLAUDE.md'),
+        join(scanDir, 'Context', 'CLAUDE.md'),
+        join(scanDir, '.claude', 'CLAUDE.md'),
+        join(scanDir, '.clauderc'),
+        join(scanDir, '.claude', 'settings.json'),
+        join(home, '.claude', 'CLAUDE.md'),
+      ],
     },
     {
       id: 'cursor',
@@ -39,6 +58,14 @@ function getToolConfigs(scanDir: string): ToolConfig[] {
       paths: [
         join(scanDir, '.cursorrules'),
         join(scanDir, '.cursor', 'rules'),
+      ],
+    },
+    {
+      id: 'copilot',
+      name: 'GitHub Copilot',
+      paths: [
+        join(scanDir, '.github', 'copilot-instructions.md'),
+        join(scanDir, '.copilot'),
       ],
     },
     {
@@ -50,11 +77,91 @@ function getToolConfigs(scanDir: string): ToolConfig[] {
       ],
     },
     {
-      id: 'codex',
+      id: 'codex-cli',
       name: 'Codex CLI',
-      paths: [join(home, '.codex', 'AGENTS.md')],
+      paths: [
+        join(scanDir, 'AGENTS.md'),
+        join(scanDir, 'Context', 'AGENTS.md'),
+        join(scanDir, '.codex', 'AGENTS.md'),
+        join(scanDir, '.codex', 'config.json'),
+        join(scanDir, 'codex.json'),
+        join(home, '.codex', 'AGENTS.md'),
+      ],
+    },
+    {
+      id: 'opencode',
+      name: 'OpenCode',
+      paths: [
+        join(scanDir, 'AGENTS.md'),
+        join(scanDir, 'Context', 'AGENTS.md'),
+        join(scanDir, '.opencode', 'AGENTS.md'),
+        join(scanDir, '.opencode', 'config.json'),
+        join(scanDir, 'opencode.json'),
+      ],
+    },
+    {
+      id: 'antigravity',
+      name: 'Antigravity',
+      paths: [
+        join(scanDir, 'GEMINI.md'),
+        join(scanDir, '.gemini', 'GEMINI.md'),
+        join(scanDir, '.gemini', 'settings.json'),
+      ],
+    },
+    {
+      id: 'openclaw',
+      name: 'OpenClaw',
+      paths: [
+        join(scanDir, 'CLAUDE.md'),
+        join(scanDir, 'Context', 'CLAUDE.md'),
+        join(scanDir, '.openclaw', 'CLAUDE.md'),
+        join(scanDir, '.openclaw', 'config.yaml'),
+        join(scanDir, 'openclaw.yaml'),
+      ],
+    },
+    {
+      id: 'generic',
+      name: 'Generic',
+      paths: [join(scanDir, '.noesis-context.md')],
     },
   ];
+}
+
+function collectFiles(dir: string): string[] {
+  const files: string[] = [];
+
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...collectFiles(fullPath));
+      continue;
+    }
+    if (entry.isFile()) {
+      files.push(fullPath);
+    }
+  }
+
+  return files.sort();
+}
+
+export function resolveImportPaths(candidatePath: string): string[] {
+  if (!existsSync(candidatePath)) {
+    return [];
+  }
+
+  try {
+    const stat = lstatSync(candidatePath);
+    if (stat.isDirectory()) {
+      return collectFiles(candidatePath);
+    }
+    if (stat.isFile()) {
+      return [candidatePath];
+    }
+  } catch {
+    return [];
+  }
+
+  return [];
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +250,10 @@ export function registerImportConfigCommand(program: Command): void {
   program
     .command('import-config')
     .description('Import learnings from existing tool configuration files')
-    .option('--tool <name>', 'Specific tool to import from (e.g., claude-code, cursor, aider, codex)')
+    .option(
+      '--tool <name>',
+      `Specific tool to import from (${SUPPORTED_IMPORT_TOOLS.join(', ')})`,
+    )
     .option('--path <dir>', 'Directory to scan for tool configs')
     .option('--dry-run', 'Show what would be imported without persisting')
     .action(async (options: {
@@ -161,19 +271,25 @@ export function registerImportConfigCommand(program: Command): void {
       if (options.tool) {
         toolConfigs = toolConfigs.filter(t => t.id === options.tool);
         if (toolConfigs.length === 0) {
-          console.error(`Unknown tool: "${options.tool}". Supported: claude-code, cursor, aider, codex`);
+          console.error(
+            `Unknown tool: "${options.tool}". Supported: ${SUPPORTED_IMPORT_TOOLS.join(', ')}`,
+          );
           process.exit(1);
         }
       }
 
-      // Scan for config files
+      // Scan for config files and project-local instruction files.
       const discovered: Array<{ tool: ToolConfig; path: string }> = [];
+      const seenPaths = new Set<string>();
 
       for (const tool of toolConfigs) {
         for (const candidatePath of tool.paths) {
-          if (existsSync(candidatePath)) {
-            discovered.push({ tool, path: candidatePath });
-            break; // Use only the first match per tool
+          for (const resolvedPath of resolveImportPaths(candidatePath)) {
+            if (seenPaths.has(resolvedPath)) {
+              continue;
+            }
+            discovered.push({ tool, path: resolvedPath });
+            seenPaths.add(resolvedPath);
           }
         }
       }

@@ -3,11 +3,30 @@
  *
  * Subcommands: create, status, iterate
  * Wired to: noesis.orchestrate, noesis.checkReadinessEvidence,
- *           noesis.recall, noesis.getGsdState, noesis.critiquePlan
+ *           noesis.remember, noesis.getMemory, noesis.createGsdProject,
+ *           noesis.getGsdState, noesis.critiquePlan
  */
 
 import { Command } from 'commander';
 import { createClient } from '../../daemon/client.js';
+import type { Memory, WritePipelineResult } from '../../types.js';
+import {
+  buildPlanTitle,
+  createStoredPlan,
+  extractPlanText,
+  isPlanMemory,
+  parseStoredPlanContent,
+} from './plan-memory.js';
+
+function formatPlanSummary(memory: Memory): {
+  storedPlan: ReturnType<typeof parseStoredPlanContent>;
+  title: string;
+} {
+  return {
+    storedPlan: parseStoredPlanContent(memory.content),
+    title: memory.title,
+  };
+}
 
 export function registerPlanCommand(program: Command): void {
   const plan = program
@@ -59,11 +78,61 @@ export function registerPlanCommand(program: Command): void {
           readinessParams,
         );
 
+        const storedPlan = createStoredPlan(
+          description,
+          projectId ?? null,
+          assembly,
+          readiness,
+        );
+
+        const rememberResult = await client.call<WritePipelineResult>(
+          'noesis.remember',
+          {
+            type: 'task',
+            title: buildPlanTitle(description),
+            content: JSON.stringify(storedPlan),
+            tags: ['plan'],
+            source: 'system',
+            scope: projectId ? 'project' : 'global',
+            ...(projectId ? { project_id: projectId } : {}),
+          },
+        );
+
+        if (!rememberResult.success || !rememberResult.memory) {
+          throw new Error(rememberResult.error ?? 'Plan persistence failed.');
+        }
+
+        const planMemory = rememberResult.memory;
+        let execution: Record<string, unknown> | null = null;
+
+        if (projectId) {
+          execution = await client.call<Record<string, unknown>>(
+            'noesis.createGsdProject',
+            {
+              project_id: projectId,
+              description,
+              plan_id: planMemory.id,
+            },
+          );
+        }
+
         if (globalOpts.json) {
-          console.log(JSON.stringify({ assembly, readiness }, null, 2));
+          console.log(JSON.stringify({
+            plan: planMemory,
+            stored_plan: storedPlan,
+            execution,
+            assembly,
+            readiness,
+          }, null, 2));
         } else {
-          // Display assembled prompt sections
-          console.log('Plan created for: ' + description);
+          console.log(`Plan created: ${planMemory.id}`);
+          console.log(`  Title: ${planMemory.title}`);
+          if (projectId) {
+            console.log(`  Project: ${projectId}`);
+          }
+          if (execution?.id) {
+            console.log(`  Execution: ${execution.id}`);
+          }
           console.log();
 
           if (assembly.priority_order && Array.isArray(assembly.priority_order)) {
@@ -87,6 +156,8 @@ export function registerPlanCommand(program: Command): void {
             console.log(`Relevant memories: ${(assembly.memories as unknown[]).length}`);
           }
 
+          console.log();
+          console.log(storedPlan.summary);
           console.log();
 
           // Display readiness score
@@ -137,31 +208,67 @@ export function registerPlanCommand(program: Command): void {
         const projectId = options.project ?? globalOpts.project;
 
         if (planId) {
-          // Look up a specific plan by ID
-          const result = await client.call<Record<string, unknown>>(
-            'noesis.recall',
-            { query: planId, type: ['task'] },
-          );
+          const planMemory = await client.getMemory(planId, {
+            type: 'task',
+            ...(projectId ? { project_id: projectId } : {}),
+          });
 
           if (globalOpts.json) {
-            console.log(JSON.stringify(result, null, 2));
+            if (!planMemory || !isPlanMemory(planMemory)) {
+              console.log(JSON.stringify({ plan: null }, null, 2));
+              return;
+            }
+
+            const executionResult = planMemory.project_id
+              ? await client.call<Record<string, unknown>>(
+                'noesis.getGsdState',
+                { project_id: planMemory.project_id },
+              )
+              : null;
+
+            console.log(JSON.stringify({
+              plan: planMemory,
+              stored_plan: parseStoredPlanContent(planMemory.content),
+              execution: executionResult?.execution ?? null,
+              progress: executionResult?.progress ?? null,
+            }, null, 2));
           } else {
-            const memories = (result.memories ?? []) as Array<Record<string, unknown>>;
-            if (memories.length === 0) {
+            if (!planMemory || !isPlanMemory(planMemory)) {
               console.log(`No plan found for: ${planId}`);
             } else {
-              console.log(`Plan: ${planId}`);
+              const { storedPlan } = formatPlanSummary(planMemory);
+              const executionResult = planMemory.project_id
+                ? await client.call<Record<string, unknown>>(
+                  'noesis.getGsdState',
+                  { project_id: planMemory.project_id },
+                )
+                : null;
+              const execution = executionResult?.execution as Record<string, unknown> | null;
+
+              console.log(`Plan: ${planMemory.id}`);
               console.log();
-              for (const mem of memories) {
-                console.log(`  ID:      ${mem.id}`);
-                console.log(`  Title:   ${mem.title}`);
-                console.log(`  Type:    ${mem.type}`);
-                console.log(`  Created: ${mem.created_at}`);
-                if (mem.content) {
-                  const content = String(mem.content);
-                  console.log(`  Content: ${content.length > 200 ? content.slice(0, 200) + '...' : content}`);
-                }
-                console.log();
+              console.log(`  Title:   ${planMemory.title}`);
+              console.log(`  Type:    ${planMemory.type}`);
+              console.log(`  Created: ${planMemory.created_at}`);
+              if (planMemory.project_id) {
+                console.log(`  Project: ${planMemory.project_id}`);
+              }
+              if (storedPlan) {
+                const total = typeof storedPlan.readiness.total === 'number'
+                  ? storedPlan.readiness.total
+                  : 0;
+                const passed = storedPlan.readiness.passed === true;
+                console.log(`  Readiness: ${total}/100 ${passed ? '[PASS]' : '[FAIL]'}`);
+              }
+              if (execution?.plan_id === planMemory.id) {
+                console.log(`  Execution: ${execution.id}`);
+                console.log(`  Status:    ${execution.status}`);
+              }
+              console.log();
+              if (storedPlan?.summary) {
+                console.log(storedPlan.summary);
+              } else if (planMemory.content) {
+                console.log(planMemory.content);
               }
             }
           }
@@ -189,6 +296,9 @@ export function registerPlanCommand(program: Command): void {
               console.log(`Project: ${projectId}`);
               console.log(`  Status:  ${execution.status}`);
               console.log(`  ID:      ${execution.id}`);
+              if (execution.plan_id) {
+                console.log(`  Plan ID:  ${execution.plan_id}`);
+              }
               if (execution.created_at) {
                 console.log(`  Started: ${execution.created_at}`);
               }
@@ -226,20 +336,13 @@ export function registerPlanCommand(program: Command): void {
         await client.ensureDaemon();
         await client.connect();
 
-        // Step 1: Recall the plan content
-        const recallResult = await client.call<Record<string, unknown>>(
-          'noesis.recall',
-          { query: planId, type: ['task'] },
-        );
-
-        const memories = (recallResult.memories ?? []) as Array<Record<string, unknown>>;
-        if (memories.length === 0) {
+        const planMemory = await client.getMemory(planId, { type: 'task' });
+        if (!planMemory || !isPlanMemory(planMemory)) {
           console.error(`No plan found for: ${planId}`);
           process.exit(1);
         }
 
-        // Use the first matching memory's content
-        const planContent = String(memories[0].content ?? memories[0].title ?? planId);
+        const planContent = extractPlanText(planMemory);
 
         // Step 2: Critique the plan content
         const critique = await client.call<Record<string, unknown>>(
@@ -248,9 +351,12 @@ export function registerPlanCommand(program: Command): void {
         );
 
         if (globalOpts.json) {
-          console.log(JSON.stringify(critique, null, 2));
+          console.log(JSON.stringify({
+            plan: planMemory,
+            critique,
+          }, null, 2));
         } else {
-          console.log(`Critique for plan: ${planId}`);
+          console.log(`Critique for plan: ${planMemory.id}`);
           console.log();
 
           if (critique.overallAssessment) {

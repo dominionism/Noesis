@@ -52,7 +52,7 @@ describe('parseInboxContent', () => {
   it('defaults to task type for unclassified content', () => {
     const learnings = parseInboxContent(
       'Implement the new dashboard feature with chart rendering support',
-      'codex',
+      'codex-cli',
     );
 
     expect(learnings).toHaveLength(1);

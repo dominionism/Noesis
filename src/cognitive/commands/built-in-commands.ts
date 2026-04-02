@@ -299,7 +299,7 @@ const BUILT_IN_COMMANDS: CommandDefinitionInput[] = [
     category: 'memory',
     argument_hint: '<memory-id>',
     allowed_tools: ['memory'],
-    content: 'Archive or permanently delete a memory by ID. Archived memories move to cold storage. Deletion is permanent.',
+    content: 'Archive or permanently delete a memory by ID. Archived memories remain in SQLite until garbage collection; deletion is permanent.',
   },
   {
     name: 'decide',

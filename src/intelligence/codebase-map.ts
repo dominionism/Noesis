@@ -4,7 +4,7 @@
  * Builds and maintains a structured understanding of a repository
  * at multiple granularities: repo, package, module, file, symbol.
  *
- * ABILITIES.md Improvement #8: Repository understanding.
+ * Provides repository understanding at multiple granularities.
  *
  * Security:
  * - A05: No external dependencies; only uses fs and path.

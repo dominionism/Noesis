@@ -124,7 +124,7 @@ Retrieve memories using hybrid search (FTS5 BM25 + vector cosine + recency + con
 
 ### `noesis.remember`
 
-Store a new memory through the 9-step write pipeline (secret scan, dangerous pattern check, classification, ID generation, HMAC signing, validation, INSERT, audit log, event emission).
+Store a new memory through the full write pipeline (secret scan, dangerous pattern check, classification, signing, deduplication, INSERT, audit log, and event emission).
 
 **Parameters:**
 
@@ -372,8 +372,11 @@ Trigger bidirectional sync with a specific adapter. Pushes context to the adapte
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `adapter_id` | string | Yes | Adapter identifier (e.g., `"claude-code"`, `"cursor"`) |
-| `project_id` | string | No | Project scope |
+| `adapter_id` | string | No | Adapter identifier or `"all"` (default: all detected adapters) |
+| `project_root` | string | Conditionally | Project root to sync. Required unless `project_id` is supplied. |
+| `project_id` | string | Conditionally | Project scope. Required unless `project_root` is supplied. |
+| `dry_run` | boolean | No | Preview sync without mutating files or inbox state |
+| `force` | boolean | No | Bypass sync cooldown |
 
 **Result:**
 
@@ -381,9 +384,16 @@ Trigger bidirectional sync with a specific adapter. Pushes context to the adapte
 {
   "status": "completed",
   "adapter_id": "claude-code",
-  "files_written": 2,
-  "learnings_ingested": 3,
-  "tokens_used": 12500
+  "project_root": "/path/to/project",
+  "planId": "01HXYZ...",
+  "totalFilesWritten": 1,
+  "totalTokensInjected": 12500,
+  "writeback": {
+    "entriesFound": 1,
+    "entriesProcessed": 1,
+    "memoriesCreated": 1,
+    "errors": []
+  }
 }
 ```
 
@@ -391,12 +401,13 @@ Trigger bidirectional sync with a specific adapter. Pushes context to the adapte
 
 ### `noesis.subscribe`
 
-Subscribe to push-based event notifications from the daemon.
+Subscribe to push-based event notifications from the daemon. Successful subscriptions cause the daemon to send JSON-RPC notifications with `method: "event"` over the same socket.
 
 **Parameters:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
+| `subscription_id` | string or number | No | Caller-provided subscription key. If omitted, the daemon generates one. |
 | `events` | string[] | Yes | Event types to subscribe to |
 
 **Event types:**
@@ -418,17 +429,39 @@ Subscribe to push-based event notifications from the daemon.
 ```json
 {
   "status": "subscribed",
+  "subscription_id": 7,
   "subscribed_events": ["memory_written", "integrity_violation"]
 }
 ```
 
 ---
 
-## Workflow Methods
+### `noesis.unsubscribe`
 
-### `noesis.planCreate`
+Remove a previously registered event subscription.
 
-Create a new plan using the RPI (Research-Plan-Implement) pipeline. The plan is enriched with relevant memories, skills, and anti-patterns.
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `subscription_id` | string or number | Yes | Subscription key returned by `noesis.subscribe` |
+
+**Result:**
+
+```json
+{
+  "status": "unsubscribed",
+  "subscription_id": 7
+}
+```
+
+---
+
+## Workflow And Cognitive Methods
+
+### `noesis.checkReadinessEvidence`
+
+Score how ready a task is for execution and return evidence-backed gaps.
 
 **Parameters:**
 
@@ -439,66 +472,55 @@ Create a new plan using the RPI (Research-Plan-Implement) pipeline. The plan is 
 
 ---
 
-### `noesis.planStatus`
+### `noesis.critiqueResearch`
 
-Get the current status of an active plan.
+Run the enhanced critic in research mode.
 
 **Parameters:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `plan_id` | string | Yes | Plan identifier |
+| `work` | string | Yes | Research output to critique |
+| `max_iterations` | number | No | Maximum critique cycles |
 
 ---
 
-### `noesis.scoreReadiness`
+### `noesis.critiquePlan`
 
-Score the readiness of a task for implementation. Returns a 5-dimension readiness assessment (clarity, codebase, prior art, risk, complexity) with a minimum threshold of 70.
+Run the enhanced critic in plan mode.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `work` | string | Yes | Plan text to critique |
+| `max_iterations` | number | No | Maximum critique cycles |
+
+---
+
+### `noesis.routeExpertCognitive`
+
+Route a task to the best matching expert agent.
 
 **Parameters:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | `task` | string | Yes | Task description |
-| `project_id` | string | No | Project scope |
+| `keywords` | string[] | No | Extra routing hints |
+| `prefer_category` | string | No | Preferred expert category |
 
 ---
 
-### `noesis.critique`
+### `noesis.detectVerification`
 
-Run evidence-backed critique on a plan or implementation. Evaluates 7 research dimensions and 7 plan dimensions with blocking/warning/advisory severity levels.
+Detect verification tooling and test affordances for a project root.
 
 **Parameters:**
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `plan_id` | string | Yes | Plan to critique |
-| `phase` | string | No | `"research"` or `"plan"` |
-
----
-
-### `noesis.verify`
-
-Run 3-level goal-backward verification (exists, substantive, wired) against a plan or implementation.
-
-**Parameters:**
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| `plan_id` | string | Yes | Plan to verify |
-
----
-
-### `noesis.routeExpert`
-
-Route a task to the most appropriate expert agent based on task characteristics and user cognitive profile.
-
-**Parameters:**
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| `task` | string | Yes | Task description |
-| `project_id` | string | No | Project scope |
+| `project_root` | string | Yes | Absolute or relative project root |
 
 ---
 

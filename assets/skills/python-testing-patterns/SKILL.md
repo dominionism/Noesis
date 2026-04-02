@@ -217,7 +217,7 @@ def is_valid_email(email: str) -> bool:
 
 @pytest.mark.parametrize("email,expected", [
     ("user@example.com", True),
-    ("test.user@example.org", True),
+    ("test.user@domain.co.uk", True),
     ("invalid.email", False),
     ("@example.com", False),
     ("user@domain", False),

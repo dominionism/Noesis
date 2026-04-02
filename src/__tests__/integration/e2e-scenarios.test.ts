@@ -33,8 +33,7 @@ import { analyzeSession, type SessionActivity } from '../../intelligence/frictio
 import { routeOperation } from '../../intelligence/model-router.js';
 import { createProfile, updateFromCorrection, updateFromTaskCompletion, getExpertise } from '../../intelligence/cognitive-profile.js';
 
-// Workflow
-import { createSession, pauseSession, resumeSession, completeSession } from '../../workflow/session-manager.js';
+// Workflow (cognitive replacements — deprecated in-memory session-manager removed)
 
 // Sync
 import { createSyncPlan, executeSyncForTarget, aggregateResults, type SyncTarget } from '../../sync/sync-orchestrator.js';
@@ -320,20 +319,9 @@ describe('E2E Scenario 4: Inbox ingestion through classification', () => {
 
 describe('E2E Scenario 5: Session lifecycle with cognitive profiling', () => {
   it('tracks session through full lifecycle with profile updates', () => {
-    // Step 1: Create and manage session
-    const session = createSession('project-1', 'claude-code');
-    expect(session.status).toBe('active');
-
-    const paused = pauseSession(session, 'step-3', 'Review PR changes');
-    expect(paused.status).toBe('paused');
-    expect(paused.nextAction).toBe('Review PR changes');
-
-    const resumed = resumeSession(paused);
-    expect(resumed.status).toBe('active');
-
-    const completed = completeSession(resumed, 'All tasks done');
-    expect(completed.status).toBe('completed');
-    expect(completed.summary).toBe('All tasks done');
+    // Step 1: Session lifecycle is now handled by cognitive/continuity/session-manager
+    // (DB-backed via startSession). The deprecated in-memory session-manager has been removed.
+    // This scenario focuses on cognitive profile + friction detection integration.
 
     // Step 2: Build cognitive profile from task completions
     let profile = createProfile();

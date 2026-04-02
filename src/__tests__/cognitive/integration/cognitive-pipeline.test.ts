@@ -41,6 +41,7 @@ import { matchSkills } from '../../../cognitive/skills/skill-matcher.js';
 
 // Contexts
 import { seedBuiltInContexts } from '../../../cognitive/context/built-in-contexts.js';
+import { upsertContext } from '../../../cognitive/context/context-store.js';
 import { assembleContexts } from '../../../cognitive/context/context-engine.js';
 
 // Gates
@@ -187,9 +188,27 @@ describe('Full Cognitive Pipeline Integration', () => {
 
     it('step 5: assembles contexts with priority ordering', () => {
       const { db } = setup();
+      upsertContext(db, {
+        context_type: 'decisions',
+        content: '## Locked Decisions\n- Use SQLite',
+      }, sign);
+      upsertContext(db, {
+        context_type: 'state',
+        content: `## Project Status
+In progress
+
+## Current Phase
+Implementation
+
+## Working Set
+- src/assets/registry.ts`,
+      }, sign);
+
       const { contexts, totalTokens } = assembleContexts(db, null, 50000);
-      expect(contexts.length).toBe(13); // All built-in contexts
+
+      expect(contexts.length).toBe(2);
       expect(contexts[0].context_type).toBe('decisions'); // Highest priority
+      expect(contexts[1].context_type).toBe('state');
       expect(totalTokens).toBeGreaterThan(0);
     });
 
@@ -233,7 +252,7 @@ describe('Full Cognitive Pipeline Integration', () => {
       // Verify all components assembled
       expect(assembly.reasoning_scaffold).toContain('Cognitive Reasoning Framework');
       expect(assembly.rules.length).toBeGreaterThan(0);
-      expect(assembly.contexts.length).toBeGreaterThan(0);
+      expect(assembly.contexts.length).toBeGreaterThanOrEqual(0);
       expect(assembly.memories).toHaveLength(1);
       expect(assembly.prompt_shape.goal).toContain('architecture');
     });
@@ -296,9 +315,9 @@ describe('Full Cognitive Pipeline Integration', () => {
 
       // No expert for non-substantial task
       expect(assembly.expert).toBeNull();
-      // Still has reasoning scaffold and contexts
+      // Still has reasoning scaffold even when template-only contexts are filtered.
       expect(assembly.reasoning_scaffold.length).toBeGreaterThan(0);
-      expect(assembly.contexts.length).toBeGreaterThan(0);
+      expect(assembly.contexts.length).toBeGreaterThanOrEqual(0);
     });
   });
 

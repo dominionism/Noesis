@@ -382,16 +382,19 @@ async function initCognitiveModules(db: DatabaseConnection, sign: SignFn): Promi
       const { registerMarkdownAssets } = await import('../assets/registry.js');
       const mdStats = await registerMarkdownAssets(db, sign);
       const totalNew = mdStats.experts.registered + mdStats.skills.registered + mdStats.rules.registered;
-      const totalUpgraded = mdStats.experts.upgraded + mdStats.skills.upgraded + mdStats.rules.upgraded;
-      if (totalNew + totalUpgraded > 0) {
+      const totalUpdated = mdStats.experts.updated + mdStats.skills.updated + mdStats.rules.updated;
+      const totalErrors = mdStats.experts.errors + mdStats.skills.errors + mdStats.rules.errors + mdStats.capsules.errors;
+      if (totalNew + totalUpdated + totalErrors > 0) {
         const parts: string[] = [];
         if (totalNew > 0) parts.push(`${totalNew} new`);
-        if (totalUpgraded > 0) parts.push(`${totalUpgraded} upgraded`);
+        if (totalUpdated > 0) parts.push(`${totalUpdated} updated`);
+        if (totalErrors > 0) parts.push(`${totalErrors} errors`);
         process.stderr.write(
           `[noesis:daemon]   Markdown assets: ${parts.join(', ')} ` +
-          `(${mdStats.experts.registered}+${mdStats.experts.upgraded}E ` +
-          `${mdStats.skills.registered}+${mdStats.skills.upgraded}S ` +
-          `${mdStats.rules.registered}+${mdStats.rules.upgraded}R)\n`,
+          `(${mdStats.experts.registered}+${mdStats.experts.updated}E ` +
+          `${mdStats.skills.registered}+${mdStats.skills.updated}S ` +
+          `${mdStats.rules.registered}+${mdStats.rules.updated}R` +
+          `${totalErrors > 0 ? ` ${totalErrors}X` : ''})\n`,
         );
       }
     } catch (e) {

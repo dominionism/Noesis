@@ -1,14 +1,16 @@
 /**
  * Claude Code Adapter
  *
- * Target: CLAUDE.md
+ * Canonical target: Context/CLAUDE.md
+ * Compatibility bridge: CLAUDE.md
  * Budget: 50K tokens
  * Write-back: Full CLI write-back via `noesis` commands
  * Session: Full session support with structured correction
  *
  * Claude Code reads CLAUDE.md from the project root and from
- * ~/.claude/CLAUDE.md for global instructions. This adapter targets
- * the project-level CLAUDE.md file with managed sections.
+ * ~/.claude/CLAUDE.md for global instructions. Noesis stores the
+ * managed project copy in Context/CLAUDE.md and the sync layer
+ * creates a repo-root compatibility bridge at CLAUDE.md.
  *
  * Detection looks for:
  * - .claude/ directory
@@ -47,7 +49,7 @@ import type { CognitiveEnrichment } from './base-adapter.js';
 const ADAPTER_ID = 'claude-code';
 const DISPLAY_NAME = 'Claude Code';
 const VERSION = '1.0.0';
-const TARGET_FILE = 'CLAUDE.md';
+const TARGET_FILE = 'Context/CLAUDE.md';
 const DETECTION_PATHS = ['.claude', 'CLAUDE.md', '.clauderc'];
 const CONFIG_PATHS = ['.claude/settings.json', 'CLAUDE.md'];
 

@@ -581,10 +581,8 @@ function registerCognitiveSessionCommands(program: Command): void {
     .option('--gate <type>', 'Gate type filter')
     .action(async (options: { gate?: string }) => {
       const json = program.opts()['json'] === true;
-      // Effectiveness comes from the readiness gate metrics
       const params: Record<string, unknown> = {};
       if (options.gate) params.gate_type = options.gate;
-      // This uses the getContexts endpoint to get effectiveness data
-      await rpcCall('getContexts', { types: ['failure_patterns'] }, json);
+      await rpcCall('getEffectivenessMetrics', params, json);
     });
 }

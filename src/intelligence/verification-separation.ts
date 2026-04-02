@@ -4,7 +4,7 @@
  * Enforces that important outputs go through external verification
  * before approval, rather than relying on model self-approval.
  *
- * ABILITIES.md Improvement #5: Separate proposer, verifier, and judge roles.
+ * Separates proposer, verifier, and judge responsibilities.
  *
  * Core principles:
  * - Use static analysis, tests, type checks, syntax checks, diff checks,

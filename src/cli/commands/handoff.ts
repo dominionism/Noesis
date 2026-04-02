@@ -36,41 +36,24 @@ export function registerHandoffCommand(program: Command): void {
         await client.ensureDaemon();
         await client.connect();
 
-        // Create a checkpoint memory with handoff metadata
-        const checkpointContent = JSON.stringify({
-          task_description: options.summary,
-          completed_steps: [],
-          remaining_steps: [],
-          current_blockers: [],
-          relevant_files: [],
-          working_state: 'handoff',
-          handoff_source: options.source,
-          handoff_target: options.target,
-        });
-
-        const params: Record<string, unknown> = {
-          type: 'checkpoint',
-          title: `Handoff: ${options.source} -> ${options.target}`,
-          content: checkpointContent,
-          tags: ['handoff', options.source, options.target],
-          confirmed: true,
-        };
-
         const projectId = options.project ?? globalOpts.project;
-        if (projectId) {
-          params.project_id = projectId;
-        }
-
-        const result = await client.call<Record<string, unknown>>('noesis.remember', params);
+        const result = await client.call<Record<string, unknown>>('noesis.createHandoff', {
+          source_agent: options.source,
+          target_agent: options.target,
+          reason: options.reason,
+          state_summary: options.summary,
+          priority: options.priority,
+          ...(projectId ? { project_id: projectId } : {}),
+        });
 
         if (globalOpts.json) {
           console.log(JSON.stringify(result, null, 2));
-        } else if (result.success && result.memory) {
-          const mem = result.memory as Record<string, unknown>;
-          console.log(`Handoff created: ${mem.id}`);
+        } else if (result.id) {
+          console.log(`Handoff created: ${result.id}`);
           console.log(`  From: ${options.source}`);
           console.log(`  To:   ${options.target}`);
           console.log(`  Reason: ${options.reason}`);
+          console.log(`  Priority: ${options.priority}`);
         } else {
           console.log('Failed to create handoff.');
         }
@@ -86,6 +69,7 @@ export function registerHandoffCommand(program: Command): void {
     .command('list')
     .description('List recent handoffs')
     .option('--limit <n>', 'Maximum results', parseInt)
+    .option('--project <id>', 'Project ID')
     .action(async (options: { limit?: number }) => {
       const globalOpts = program.opts();
       const client = createClient();
@@ -94,25 +78,27 @@ export function registerHandoffCommand(program: Command): void {
         await client.ensureDaemon();
         await client.connect();
 
-        const result = await client.call<Record<string, unknown>>('noesis.recall', {
-          query: 'handoff',
-          type: ['checkpoint'],
-          tags: ['handoff'],
+        const projectId = (options as { project?: string }).project ?? globalOpts.project;
+        const result = await client.call<Record<string, unknown>>('noesis.listHandoffs', {
           limit: options.limit ?? 10,
+          ...(projectId ? { project_id: projectId } : {}),
         });
 
         if (globalOpts.json) {
           console.log(JSON.stringify(result, null, 2));
         } else {
-          const memories = (result as Record<string, unknown>).memories as Array<Record<string, unknown>> | undefined;
-          if (!memories || memories.length === 0) {
+          const handoffs = (result as Record<string, unknown>).handoffs as Array<Record<string, unknown>> | undefined;
+          if (!handoffs || handoffs.length === 0) {
             console.log('No handoffs found.');
           } else {
-            console.log(`${memories.length} handoff(s):\n`);
-            for (const mem of memories) {
-              console.log(`  ${mem.id}`);
-              console.log(`    Title: ${mem.title}`);
-              console.log(`    Created: ${mem.created_at}`);
+            console.log(`${handoffs.length} handoff(s):\n`);
+            for (const handoff of handoffs) {
+              console.log(`  ${handoff.id}`);
+              console.log(`    From: ${handoff.source_agent}`);
+              console.log(`    To: ${handoff.target_agent}`);
+              console.log(`    Reason: ${handoff.reason}`);
+              console.log(`    Priority: ${handoff.priority ?? 'normal'}`);
+              console.log(`    Created: ${handoff.created_at}`);
               console.log();
             }
           }

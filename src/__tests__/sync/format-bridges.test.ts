@@ -23,16 +23,16 @@ describe('getAdapterFormat', () => {
     expect(getAdapterFormat('claude-code')).toBe('markdown');
   });
 
-  it('returns toml for antigravity', () => {
-    expect(getAdapterFormat('antigravity')).toBe('toml');
+  it('returns markdown for antigravity', () => {
+    expect(getAdapterFormat('antigravity')).toBe('markdown');
   });
 
-  it('returns frontmatter for cursor', () => {
-    expect(getAdapterFormat('cursor')).toBe('frontmatter');
+  it('returns markdown for cursor', () => {
+    expect(getAdapterFormat('cursor')).toBe('markdown');
   });
 
-  it('returns json for generic', () => {
-    expect(getAdapterFormat('generic')).toBe('json');
+  it('returns markdown for generic', () => {
+    expect(getAdapterFormat('generic')).toBe('markdown');
   });
 
   it('returns plain for unknown adapter', () => {
@@ -86,7 +86,7 @@ describe('transformToFormat', () => {
 describe('transformForAdapter', () => {
   it('uses the correct format for the adapter', () => {
     const result = transformForAdapter('antigravity', makeSections());
-    expect(result.format).toBe('toml');
+    expect(result.format).toBe('markdown');
   });
 });
 

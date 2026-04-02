@@ -32,6 +32,10 @@ import {
   getBuiltInContextTypes,
   getContextTemplate,
 } from '../../cognitive/context/built-in-contexts.js';
+import {
+  documentDecision,
+  deferIdea,
+} from '../../cognitive/continuity/decision-fidelity.js';
 import type { ContextType } from '../../cognitive/types.js';
 
 const sign = (content: string) => `sig_${content.length}`;
@@ -253,6 +257,38 @@ describe('Context Engine', () => {
       expect(decisions!.content).toBe('Project decisions');
     });
 
+    it('filters seeded template-only contexts from assembly', () => {
+      const { db } = setup();
+      seedBuiltInContexts(db, sign);
+
+      const { contexts, totalTokens } = assembleContexts(db, null, 10000);
+
+      expect(contexts).toHaveLength(0);
+      expect(totalTokens).toBe(0);
+    });
+
+    it('keeps populated contexts while dropping placeholder-only templates', () => {
+      const { db } = setup();
+      seedBuiltInContexts(db, sign);
+      upsertContext(db, {
+        context_type: 'state',
+        content: `## Project Status
+Active remediation
+
+## Current Phase
+P7 implementation
+
+## Working Set
+- src/assets/registry.ts`,
+      }, sign);
+
+      const { contexts } = assembleContexts(db, null, 10000);
+
+      expect(contexts).toHaveLength(1);
+      expect(contexts[0].context_type).toBe('state');
+      expect(contexts[0].content).toContain('Active remediation');
+    });
+
     it('parses decisions into categories', () => {
       const { db } = setup();
       upsertContext(db, {
@@ -274,6 +310,38 @@ describe('Context Engine', () => {
       expect(decisions.locked).toEqual(['Use TypeScript strict mode', 'SQLite for storage']);
       expect(decisions.deferred).toEqual(['Mobile support', 'GraphQL API']);
       expect(decisions.discretion).toEqual(['Formatting preferences', 'Comment style']);
+    });
+
+    it('parses and renders decisions stored by decision-fidelity', () => {
+      const { db } = setup();
+
+      documentDecision(
+        db,
+        'proj-1',
+        'Use TypeScript strict mode',
+        'Type safety is non-negotiable',
+        sign,
+        { tags: ['typescript', 'quality'] },
+      );
+      deferIdea(
+        db,
+        'proj-1',
+        'Add GraphQL API',
+        'Deferred until after MVP',
+        sign,
+      );
+
+      const decisions = getDecisions(db, 'proj-1');
+      expect(decisions.locked).toEqual(['Use TypeScript strict mode']);
+      expect(decisions.deferred).toEqual(['Add GraphQL API']);
+
+      const { contexts } = assembleContexts(db, 'proj-1', 10000);
+      const decisionsCtx = contexts.find(c => c.context_type === 'decisions');
+      expect(decisionsCtx).toBeDefined();
+      expect(decisionsCtx!.content).toContain('- Use TypeScript strict mode');
+      expect(decisionsCtx!.content).toContain('Why: Type safety is non-negotiable');
+      expect(decisionsCtx!.content).toContain('## Deferred');
+      expect(decisionsCtx!.content).not.toContain('"decisions"');
     });
 
     it('returns empty decisions when no context', () => {
@@ -306,6 +374,32 @@ describe('Context Engine', () => {
       expect(patterns[0].trigger).toBe('ORM loop without eager loading');
       expect(patterns[0].prevention).toBe('Always use eager loading for list queries');
       expect(patterns[1].rootCause).toBe('Skipped validation step');
+    });
+
+    it('parses and normalizes legacy failure-pattern writeback format', () => {
+      const { db } = setup();
+      upsertContext(db, {
+        context_type: 'failure_patterns',
+        content: `## Failure Patterns
+### verification: Test suite did not cover edge case
+- **Miss:** Edge case in date parsing
+- **Root Cause:** No boundary tests for leap years
+- **Prevention:** Add boundary tests for all date operations`,
+      }, sign);
+
+      const patterns = getFailurePatterns(db);
+      expect(patterns).toHaveLength(1);
+      expect(patterns[0].trigger).toBe('Test suite did not cover edge case');
+      expect(patterns[0].miss).toBe('Edge case in date parsing');
+      expect(patterns[0].rootCause).toBe('No boundary tests for leap years');
+      expect(patterns[0].prevention).toBe('Add boundary tests for all date operations');
+
+      const { contexts } = assembleContexts(db, null, 10000);
+      const failureCtx = contexts.find(c => c.context_type === 'failure_patterns');
+      expect(failureCtx).toBeDefined();
+      expect(failureCtx!.content).toContain('## verification: Test suite did not cover edge case');
+      expect(failureCtx!.content).toContain('- Trigger: Test suite did not cover edge case');
+      expect(failureCtx!.content).not.toContain('**Miss:**');
     });
 
     it('parses user taste', () => {
@@ -495,16 +589,12 @@ describe('Context Engine', () => {
       expect(projDecisions!.content).toContain('## Locked Decisions');
     });
 
-    it('seeded contexts assemble in priority order', () => {
+    it('seeded templates do not assemble as substantive active context', () => {
       const { db } = setup();
       seedBuiltInContexts(db, sign);
 
       const { contexts } = assembleContexts(db, null, 100000);
-      expect(contexts.length).toBe(13);
-      // First should be decisions (highest priority)
-      expect(contexts[0].context_type).toBe('decisions');
-      // Last should be agent_catalog (lowest priority)
-      expect(contexts[contexts.length - 1].context_type).toBe('agent_catalog');
+      expect(contexts).toHaveLength(0);
     });
   });
 });

@@ -219,6 +219,12 @@ describe('replaceManagedSection', () => {
     expect(result).toContain('<!-- NOESIS:BEGIN adapter=test');
   });
 
+  it('does not introduce a leading blank line when creating a new file', () => {
+    const result = replaceManagedSection('', 'test', 'fresh content', '1.0.0');
+    expect(result.startsWith('\n')).toBe(false);
+    expect(result).toContain('fresh content');
+  });
+
   it('updates the hash in the new marker', () => {
     const original = createManagedSection('old', 'test', '1.0.0');
     const result = replaceManagedSection(original, 'test', 'new', '1.0.1');

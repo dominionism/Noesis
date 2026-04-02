@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { join } from 'node:path';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { DatabaseConnection } from '../../core/database.js';
 import {
@@ -195,6 +195,69 @@ describe('noesis.recall', () => {
   });
 });
 
+describe('noesis.getMemory', () => {
+  it('requires id parameter', async () => {
+    const res = await handle(rpcMessage('noesis.getMemory', {}));
+    expect(res.error?.code).toBe(-32602);
+    expect(res.error?.message).toContain('id');
+  });
+
+  it('returns an exact memory match by id', async () => {
+    const createRes = await handle(rpcMessage('noesis.remember', {
+      type: 'task',
+      title: 'Persisted Plan',
+      content: '{"kind":"plan","version":1}',
+      tags: ['plan'],
+      project_id: 'proj-1',
+    }));
+    const memory = (createRes.result as Record<string, unknown>)['memory'] as Record<string, unknown>;
+    const memoryId = memory['id'] as string;
+
+    const res = await handle(rpcMessage('noesis.getMemory', { id: memoryId }));
+    expect(res.error).toBeUndefined();
+
+    const fetched = res.result as Record<string, unknown>;
+    expect(fetched['id']).toBe(memoryId);
+    expect(fetched['title']).toBe('Persisted Plan');
+    expect(fetched['project_id']).toBe('proj-1');
+  });
+
+  it('returns null when the type filter does not match', async () => {
+    const createRes = await handle(rpcMessage('noesis.remember', {
+      type: 'task',
+      title: 'Task Memory',
+      content: 'content',
+    }));
+    const memory = (createRes.result as Record<string, unknown>)['memory'] as Record<string, unknown>;
+
+    const res = await handle(rpcMessage('noesis.getMemory', {
+      id: memory['id'],
+      type: 'session',
+    }));
+
+    expect(res.error).toBeUndefined();
+    expect(res.result).toBeNull();
+  });
+
+  it('returns null when the project filter does not match', async () => {
+    const createRes = await handle(rpcMessage('noesis.remember', {
+      type: 'task',
+      title: 'Project Task',
+      content: 'content',
+      project_id: 'proj-a',
+    }));
+    const memory = (createRes.result as Record<string, unknown>)['memory'] as Record<string, unknown>;
+
+    const res = await handle(rpcMessage('noesis.getMemory', {
+      id: memory['id'],
+      project_id: 'proj-b',
+    }));
+
+    expect(res.error).toBeUndefined();
+    expect(res.result).toBeNull();
+  });
+});
+
 describe('noesis.remember', () => {
   it('requires type, title, and content', async () => {
     const res1 = await handle(rpcMessage('noesis.remember', { title: 't', content: 'c' }));
@@ -257,12 +320,31 @@ describe('noesis.retrievalGap', () => {
   });
 
   it('returns gap analysis results', async () => {
+    const getUnresolvedConflictCount = vi.fn().mockReturnValue(2);
+    handle = createRpcHandler(makeDeps({ getUnresolvedConflictCount }));
+
     const res = await handle(rpcMessage('noesis.retrievalGap', { query: 'build API' }));
     expect(res.error).toBeUndefined();
     const result = res.result as Record<string, unknown>;
     expect(result).toHaveProperty('total_results');
     expect(result).toHaveProperty('missing_types');
     expect(result).toHaveProperty('coverage_summary');
+    expect(result['unresolved_conflicts']).toBe(2);
+    expect(result['coverage_summary']).toContain('2 unresolved conflicts');
+    expect(getUnresolvedConflictCount).toHaveBeenCalledWith(undefined);
+  });
+
+  it('passes project_id through to unresolved conflict counting', async () => {
+    const getUnresolvedConflictCount = vi.fn().mockReturnValue(1);
+    handle = createRpcHandler(makeDeps({ getUnresolvedConflictCount }));
+
+    const res = await handle(rpcMessage('noesis.retrievalGap', {
+      query: 'build API',
+      project_id: 'proj-123',
+    }));
+
+    expect(res.error).toBeUndefined();
+    expect(getUnresolvedConflictCount).toHaveBeenCalledWith('proj-123');
   });
 });
 
@@ -340,6 +422,30 @@ describe('noesis.sessionStart', () => {
     const mem = getMemory(db, sessionId);
     expect(mem!.title).toContain('unknown');
   });
+
+  it('signs session memory with the generated id before insert', async () => {
+    const signMemory = vi.fn().mockReturnValue('session-signature');
+    const generateId = vi.fn().mockReturnValue('SESSION-123');
+    handle = createRpcHandler(makeDeps({ signMemory, generateId }));
+
+    const res = await handle(rpcMessage('noesis.sessionStart', { agent: 'codex' }));
+    expect(res.error).toBeUndefined();
+
+    expect(signMemory).toHaveBeenCalledWith({
+      id: 'SESSION-123',
+      type: 'session',
+      title: 'Session: codex',
+      content: expect.any(String),
+      project_id: null,
+    });
+
+    const result = res.result as Record<string, unknown>;
+    expect(result['session_id']).toBe('SESSION-123');
+
+    const mem = getMemory(db, 'SESSION-123');
+    expect(mem).not.toBeNull();
+    expect(mem!.signature).toBe('session-signature');
+  });
 });
 
 describe('noesis.sessionEnd', () => {
@@ -404,22 +510,34 @@ describe('noesis.sessionList', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Sync methods (placeholders)
+// Sync methods
 // ---------------------------------------------------------------------------
 
 describe('noesis.sync', () => {
-  it('accepts empty params and returns a status', async () => {
+  it('requires project_root or project_id', async () => {
     const res = await handle(rpcMessage('noesis.sync', {}));
-    expect(res.error).toBeUndefined();
-    const result = res.result as Record<string, unknown>;
-    expect(typeof result['status']).toBe('string');
+    expect(res.error?.code).toBe(-32602);
   });
 
-  it('returns a result with adapter_id', async () => {
-    const res = await handle(rpcMessage('noesis.sync', { adapter_id: 'claude-code' }));
+  it('runs the real runtime sync path', async () => {
+    const projectRoot = join(tempDir, 'sync-project');
+    mkdirSync(join(projectRoot, '.claude'), { recursive: true });
+    mkdirSync(join(projectRoot, '.git'), { recursive: true });
+
+    const res = await handle(rpcMessage('noesis.sync', {
+      adapter_id: 'claude-code',
+      project_root: projectRoot,
+      force: true,
+    }));
+
     expect(res.error).toBeUndefined();
     const result = res.result as Record<string, unknown>;
-    expect(typeof result['status']).toBe('string');
+    expect(result['status']).toBe('completed');
+    expect(result['adapter_id']).toBe('claude-code');
+    expect(result['project_root']).toBe(projectRoot);
+    expect(result['totalFilesWritten']).toBe(3);
+    expect(existsSync(join(projectRoot, 'CLAUDE.md'))).toBe(true);
+    expect(existsSync(join(projectRoot, 'Context', 'CLAUDE.md'))).toBe(true);
   });
 });
 
@@ -440,6 +558,41 @@ describe('noesis.subscribe', () => {
     }));
     expect(res.error).toBeUndefined();
     expect((res.result as Record<string, unknown>)['status']).toBe('not_implemented');
+  });
+
+  it('returns subscribed status when socket transport is available', async () => {
+    const subscribeEvents = vi.fn();
+    const subscribedHandle = createRpcHandler(makeDeps({ subscribeEvents }));
+
+    const res = await subscribedHandle(rpcMessage('noesis.subscribe', {
+      subscription_id: 7,
+      events: ['memory_written'],
+    }));
+
+    expect(res.error).toBeUndefined();
+    expect(subscribeEvents).toHaveBeenCalledWith(7, ['memory_written']);
+    expect((res.result as Record<string, unknown>)['status']).toBe('subscribed');
+    expect((res.result as Record<string, unknown>)['subscription_id']).toBe(7);
+  });
+});
+
+describe('noesis.unsubscribe', () => {
+  it('requires subscription_id', async () => {
+    const res = await handle(rpcMessage('noesis.unsubscribe', {}));
+    expect(res.error?.code).toBe(-32602);
+  });
+
+  it('returns unsubscribed status when socket transport is available', async () => {
+    const unsubscribeEvents = vi.fn().mockReturnValue(true);
+    const subscribedHandle = createRpcHandler(makeDeps({ unsubscribeEvents }));
+
+    const res = await subscribedHandle(rpcMessage('noesis.unsubscribe', {
+      subscription_id: 7,
+    }));
+
+    expect(res.error).toBeUndefined();
+    expect(unsubscribeEvents).toHaveBeenCalledWith(7);
+    expect((res.result as Record<string, unknown>)['status']).toBe('unsubscribed');
   });
 });
 

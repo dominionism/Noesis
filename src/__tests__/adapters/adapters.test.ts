@@ -492,7 +492,7 @@ describe('Adapter-specific behavior', () => {
       const context = createTestContext();
       const budget = createTokenBudget(50_000);
       const result = await adapter.transform(context, budget);
-      expect(result.fileWrites[0].path).toBe('CLAUDE.md');
+      expect(result.fileWrites[0].path).toBe('Context/CLAUDE.md');
     });
 
     it('detects with high confidence when CLAUDE.md exists', async () => {
@@ -583,7 +583,7 @@ describe('Adapter-specific behavior', () => {
       const context = createTestContext();
       const budget = createTokenBudget(20_000);
       const result = await adapter.transform(context, budget);
-      expect(result.fileWrites[0].path).toBe('AGENTS.md');
+      expect(result.fileWrites[0].path).toBe('Context/AGENTS.md');
     });
   });
 
@@ -594,7 +594,7 @@ describe('Adapter-specific behavior', () => {
       const context = createTestContext();
       const budget = createTokenBudget(20_000);
       const result = await adapter.transform(context, budget);
-      expect(result.fileWrites[0].path).toBe('AGENTS.md');
+      expect(result.fileWrites[0].path).toBe('Context/AGENTS.md');
     });
 
     it('detects .opencode with higher confidence', async () => {
@@ -623,7 +623,7 @@ describe('Adapter-specific behavior', () => {
       const context = createTestContext();
       const budget = createTokenBudget(20_000);
       const result = await adapter.transform(context, budget);
-      expect(result.fileWrites[0].path).toBe('CLAUDE.md');
+      expect(result.fileWrites[0].path).toBe('Context/CLAUDE.md');
     });
 
     it('requires .openclaw directory for detection', async () => {

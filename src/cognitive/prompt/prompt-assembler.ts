@@ -421,7 +421,7 @@ function formatPromptShape(shape: PromptShape): string {
 }
 
 // ---------------------------------------------------------------------------
-// Preventive Learning Injection (ABILITIES.md)
+// Preventive learning injection
 // ---------------------------------------------------------------------------
 
 /**

@@ -1,15 +1,18 @@
 /**
  * OpenClaw Adapter
  *
- * Target: CLAUDE.md
+ * Canonical target: Context/CLAUDE.md
+ * Compatibility bridge: CLAUDE.md
  * Budget: 20K tokens
  * Write-back: File append
  * Session: No session support
  *
  * OpenClaw is an open-source Claude Code alternative that reads
- * CLAUDE.md. Shares the target file with Claude Code but uses a
- * distinct adapter ID for separate managed sections. Content is
- * formatted in a YAML-friendly style.
+ * CLAUDE.md. Noesis stores the managed project copy in
+ * Context/CLAUDE.md and the sync layer creates a repo-root
+ * compatibility bridge at CLAUDE.md. Shares the canonical file
+ * with Claude Code but uses a distinct adapter ID for separate
+ * managed sections. Content is formatted in a YAML-friendly style.
  *
  * Detection looks for:
  * - .openclaw/ directory
@@ -47,7 +50,7 @@ import type { CognitiveEnrichment } from './base-adapter.js';
 const ADAPTER_ID = 'openclaw';
 const DISPLAY_NAME = 'OpenClaw';
 const VERSION = '1.0.0';
-const TARGET_FILE = 'CLAUDE.md';
+const TARGET_FILE = 'Context/CLAUDE.md';
 const DETECTION_PATHS = ['.openclaw', 'openclaw.yaml'];
 const CONFIG_PATH = '.openclaw/config.yaml';
 

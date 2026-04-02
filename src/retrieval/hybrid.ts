@@ -35,6 +35,7 @@ import type {
   MemoryConflict,
   MemoryOutcome,
   MemoryScope,
+  MemoryType,
   RecallParams,
   RecallResult,
   ScoredMemory,
@@ -371,6 +372,7 @@ export async function hybridRetrieve(params: {
       memoryProjectId: mem.project_id,
       memoryScope: mem.scope as MemoryScope,
       queryProjectId: recallParams.project_id,
+      memoryType: mem.type as MemoryType,
     });
 
     const scored: ScoredMemory = {

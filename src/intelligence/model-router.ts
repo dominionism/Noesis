@@ -332,7 +332,7 @@ function learnFromHistory(
  * based on task complexity and historical success rates.
  * Records routing decisions for learning.
  *
- * ABILITIES.md Improvement #9: Real model cascade.
+ * Implements cost-aware model cascade routing.
  */
 export function cascadeRoute(
   task: string,

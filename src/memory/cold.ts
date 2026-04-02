@@ -2,9 +2,11 @@
  * Cold Storage Management
  *
  * Persists session transcripts and events as JSONL files under
- * ~/.agents/cold/. Cold storage is the lowest tier:
+ * ~/.agents/cold/.
  *
- *   Hot (markdown) -> Warm (SQLite) -> Cold (this module)
+ * These helpers expose optional file-backed archives. The default runtime
+ * archive/delete flow keeps archived memories in SQLite and does not export
+ * them into cold storage automatically.
  *
  * Rotation at COLD_STORAGE_MAX_MB with numbered suffix scheme.
  * File permissions hardened to 0o600 on every write.

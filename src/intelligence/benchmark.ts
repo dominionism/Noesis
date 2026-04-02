@@ -4,7 +4,7 @@
  * Provides structured benchmarking to measure Noesis uplift
  * across task classes, model tiers, and quality dimensions.
  *
- * ABILITIES.md Improvement #10: Benchmark Noesis-on vs Noesis-off.
+ * Measures Noesis-on vs Noesis-off uplift.
  */
 
 // ---------------------------------------------------------------------------

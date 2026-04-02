@@ -4,11 +4,13 @@
  * Verifies readiness against a stated goal using evidence-backed scoring
  * across 5 dimensions, and retrieves relevant historical failures.
  *
- * Wired to: noesis.checkReadinessEvidence, noesis.recall
+ * Wired to: noesis.checkReadinessEvidence, noesis.recall, noesis.getMemory
  */
 
 import { Command } from 'commander';
 import { createClient } from '../../daemon/client.js';
+import type { Memory } from '../../types.js';
+import { extractPlanText, isPlanMemory } from './plan-memory.js';
 
 export function registerVerifyCommand(program: Command): void {
   program
@@ -25,18 +27,38 @@ export function registerVerifyCommand(program: Command): void {
         await client.connect();
 
         const projectId = options.project ?? globalOpts.project;
+        let referencedPlan: Memory | null = null;
+        let effectiveGoal = goal;
+
+        if (options.plan) {
+          const planMemory = await client.getMemory(options.plan, {
+            type: 'task',
+            ...(projectId ? { project_id: projectId } : {}),
+          });
+
+          if (!planMemory || !isPlanMemory(planMemory)) {
+            throw new Error(`Plan not found: ${options.plan}`);
+          }
+
+          referencedPlan = planMemory;
+          const planContent = extractPlanText(planMemory);
+          effectiveGoal = `${goal}\n\nPlan Context:\n${planContent}`;
+        }
 
         // Step 1: Check readiness evidence against the goal
         const readinessParams: Record<string, unknown> = {
-          task: goal,
+          task: effectiveGoal,
         };
         if (projectId) {
           readinessParams.project_id = projectId;
         }
+        if (options.plan) {
+          readinessParams.has_verification_plan = true;
+        }
 
         // Step 2: Recall relevant past failures and lessons
         const recallParams: Record<string, unknown> = {
-          query: goal,
+          query: effectiveGoal,
           type: ['lesson', 'incident'],
           limit: 10,
         };
@@ -54,12 +76,15 @@ export function registerVerifyCommand(program: Command): void {
         ]);
 
         if (globalOpts.json) {
-          console.log(JSON.stringify({ readiness, history: recallResult }, null, 2));
+          console.log(JSON.stringify({ readiness, history: recallResult, plan: referencedPlan }, null, 2));
         } else {
           const total = readiness.total as number ?? 0;
           const passed = readiness.passed as boolean ?? false;
 
           console.log(`Verification for: ${goal}`);
+          if (referencedPlan) {
+            console.log(`Plan: ${referencedPlan.title ?? referencedPlan.id ?? options.plan}`);
+          }
           console.log();
 
           // Readiness score with all 5 dimensions

@@ -1,14 +1,15 @@
 /**
  * Codex CLI Adapter
  *
- * Target: AGENTS.md
+ * Canonical target: Context/AGENTS.md
+ * Compatibility bridge: AGENTS.md
  * Budget: 20K tokens
  * Write-back: CLI command write-back
  * Session: Session reporting supported
  *
  * OpenAI Codex CLI reads instructions from AGENTS.md in the project root.
- * This adapter writes context to that file with managed sections and
- * a system-prompt-compatible format.
+ * Noesis stores the managed project copy in Context/AGENTS.md and the
+ * sync layer creates a repo-root compatibility bridge at AGENTS.md.
  *
  * Detection looks for:
  * - .codex/ directory
@@ -46,7 +47,7 @@ import type { CognitiveEnrichment } from './base-adapter.js';
 const ADAPTER_ID = 'codex-cli';
 const DISPLAY_NAME = 'Codex CLI';
 const VERSION = '1.0.0';
-const TARGET_FILE = 'AGENTS.md';
+const TARGET_FILE = 'Context/AGENTS.md';
 const DETECTION_PATHS = ['.codex', 'codex.json'];
 const CONFIG_PATHS = ['.codex/config.json', 'codex.json'];
 

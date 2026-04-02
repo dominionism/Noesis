@@ -160,7 +160,7 @@ describe('Invariant 2: Secret scanning cannot be disabled', () => {
   });
 
   it('detects connection strings with credentials', () => {
-    const matches = scanForSecrets('Use postgresql://admin:s3cret@db.example.com:5432/mydb');
+    const matches = scanForSecrets('Use postgresql://admin:s3cret@db.host.com:5432/mydb');
     expect(matches.length).toBeGreaterThan(0);
     expect(matches[0].type).toBe('connection_string');
   });
@@ -186,7 +186,7 @@ describe('Invariant 2: Secret scanning cannot be disabled', () => {
         input: {
           type: 'lesson',
           title: 'API Config',
-          content: 'Connect with postgresql://user:p4ssw0rd@db.example.com/db',
+          content: 'Connect with postgresql://user:p4ssw0rd@host.com/db',
           scope: 'project',
         },
       },

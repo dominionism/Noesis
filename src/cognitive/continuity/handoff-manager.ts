@@ -14,8 +14,9 @@
  */
 
 import type { DatabaseConnection } from '../../core/database.js';
-import type { Handoff, HandoffInput } from '../../types.js';
-import type { SignFn } from '../types.js';
+import type { Handoff, HandoffInput, EmbeddingProvider } from '../../types.js';
+import type { MemorySignFn } from '../types.js';
+import { createMemory } from '../../core/memory-crud.js';
 import { generateId } from '../../core/ulid.js';
 
 // ---------------------------------------------------------------------------
@@ -41,12 +42,13 @@ interface MemoryRow {
  * Returns the complete Handoff object with generated ID and timestamp.
  * The memory_refs are expected to be already-validated memory IDs.
  */
-export function createHandoff(
+export async function createHandoff(
   db: DatabaseConnection,
   input: HandoffInput,
   projectId: string | null,
-  sign: SignFn,
-): Handoff {
+  signMemory: MemorySignFn,
+  embeddingProvider?: EmbeddingProvider,
+): Promise<Handoff> {
   const id = generateId();
   const now = new Date().toISOString();
 
@@ -62,24 +64,35 @@ export function createHandoff(
   };
 
   const content = JSON.stringify(handoff);
-  const signature = sign(content);
   const title = `Handoff: ${input.source_agent} → ${input.target_agent} (${input.reason})`;
+  const signature = signMemory({
+    id,
+    type: 'checkpoint',
+    title,
+    content,
+    project_id: projectId,
+  });
 
-  db.prepare<[
-    string, string, string, string | null,
-    string, string, string, string,
-  ]>(`
-    INSERT INTO memories (
-      id, type, title, content, project_id,
-      signature, created_at, updated_at, last_accessed_at
-    ) VALUES (
-      ?, 'checkpoint', ?, ?, ?,
-      ?, ?, ?, ?
-    )
-  `).run(
-    id, title, content, projectId,
-    signature, now, now, now,
-  );
+  // Compute embedding so handoff memories are discoverable via semantic search
+  let embedding: Buffer | null = null;
+  let embeddingModel: string | null = null;
+  if (embeddingProvider) {
+    try {
+      const vector = await embeddingProvider.embed(title + ' ' + content);
+      embedding = Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength);
+      embeddingModel = embeddingProvider.modelId;
+    } catch { /* non-fatal — store without embedding */ }
+  }
+
+  createMemory(db, {
+    type: 'checkpoint',
+    title,
+    content,
+    project_id: projectId,
+    signature,
+    embedding,
+    embedding_model: embeddingModel,
+  }, id);
 
   return handoff;
 }
@@ -122,12 +135,30 @@ export function resumeFromHandoff(
  */
 export function listHandoffs(
   db: DatabaseConnection,
-  projectId: string,
+  projectId?: string | null,
   limit?: number,
 ): Handoff[] {
-  const rows = db.prepare<[string], MemoryRow>(
-    "SELECT id, type, title, content, project_id, created_at FROM memories WHERE type = 'checkpoint' AND project_id = ? ORDER BY created_at DESC",
-  ).all(projectId);
+  const conditions = ["type = 'checkpoint'"];
+  const params: Array<string | number> = [];
+
+  if (projectId) {
+    conditions.push('project_id = ?');
+    params.push(projectId);
+  }
+
+  let query = `
+    SELECT id, type, title, content, project_id, created_at
+    FROM memories
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY created_at DESC
+  `;
+
+  if (limit !== undefined) {
+    query += '\nLIMIT ?';
+    params.push(limit);
+  }
+
+  const rows = db.prepare<unknown[], MemoryRow>(query).all(...params);
 
   const handoffs: Handoff[] = [];
 
@@ -143,7 +174,7 @@ export function listHandoffs(
     }
   }
 
-  return limit ? handoffs.slice(0, limit) : handoffs;
+  return handoffs;
 }
 
 /**

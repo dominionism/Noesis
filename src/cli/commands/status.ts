@@ -1,7 +1,7 @@
 /**
  * noesis status — System health dashboard
  *
- * Shows memory count, skill count, anti-pattern count, daemon state,
+ * Shows memory count, runtime skill count, asset-file counts, daemon state,
  * and database size. Operates directly on the database and filesystem.
  */
 
@@ -14,7 +14,6 @@ import {
   SIGNING_KEY_PATH,
   CONFIG_PATH,
   DAEMON_SOCKET_PATH,
-  SKILLS_DIR,
   ANTI_PATTERNS_DIR,
 } from '../../constants.js';
 import { DatabaseConnection } from '../../core/database.js';
@@ -30,6 +29,27 @@ function formatBytes(bytes: number): string {
 function countYamlFiles(dir: string): number {
   if (!existsSync(dir)) return 0;
   return readdirSync(dir).filter(f => f.endsWith('.yaml') || f.endsWith('.yml')).length;
+}
+
+export interface RuntimeSkillCounts {
+  total: number;
+  enabled: number;
+  archived: number;
+}
+
+export function getRuntimeSkillCounts(db: DatabaseConnection): RuntimeSkillCounts {
+  const total = db.prepare<[], { count: number }>(
+    'SELECT COUNT(*) as count FROM executable_skills',
+  ).get()?.count ?? 0;
+  const enabled = db.prepare<[], { count: number }>(
+    'SELECT COUNT(*) as count FROM executable_skills WHERE enabled = 1',
+  ).get()?.count ?? 0;
+
+  return {
+    total,
+    enabled,
+    archived: Math.max(total - enabled, 0),
+  };
 }
 
 function isIpcPermissionDenied(error: unknown): boolean {
@@ -79,12 +99,18 @@ export function registerStatusCommand(program: Command): void {
 
       let memoryCount = 0;
       let dbSize = 0;
+      let skillCounts: RuntimeSkillCounts = {
+        total: 0,
+        enabled: 0,
+        archived: 0,
+      };
 
       if (hasDb) {
         let db: DatabaseConnection | null = null;
         try {
-          db = DatabaseConnection.create();
+          db = DatabaseConnection.createReadOnly();
           memoryCount = countMemories(db);
+          skillCounts = getRuntimeSkillCounts(db);
           dbSize = statSync(DB_PATH).size;
         } catch {
           // Database may be locked by daemon
@@ -114,8 +140,7 @@ export function registerStatusCommand(program: Command): void {
         }
       }
 
-      const skillCount = countYamlFiles(SKILLS_DIR);
-      const antiPatternCount = countYamlFiles(ANTI_PATTERNS_DIR);
+      const antiPatternFileCount = countYamlFiles(ANTI_PATTERNS_DIR);
 
       const status: Record<string, unknown> = {
         initialized,
@@ -129,8 +154,12 @@ export function registerStatusCommand(program: Command): void {
         daemon_rpc_status: daemonRpcStatus,
         daemon_rpc_error: daemonRpcError,
         memory_count: memoryCount,
-        skill_count: skillCount,
-        anti_pattern_count: antiPatternCount,
+        skill_count: skillCounts.total,
+        enabled_skill_count: skillCounts.enabled,
+        archived_skill_count: skillCounts.archived,
+        skill_count_source: 'sqlite.executable_skills',
+        anti_pattern_file_count: antiPatternFileCount,
+        anti_pattern_count_source: 'filesystem_yaml',
         db_size: dbSize,
       };
 
@@ -160,8 +189,10 @@ export function registerStatusCommand(program: Command): void {
 
         console.log();
         console.log(`  Memories:       ${memoryCount}`);
-        console.log(`  Skills:         ${skillCount}`);
-        console.log(`  Anti-patterns:  ${antiPatternCount}`);
+        console.log(
+          `  Skills:         ${skillCounts.total} total (${skillCounts.enabled} active, ${skillCounts.archived} archived)`,
+        );
+        console.log(`  Anti-patterns:  ${antiPatternFileCount} file(s)`);
         console.log(`  DB size:        ${formatBytes(dbSize)}`);
 
         if (!initialized) {

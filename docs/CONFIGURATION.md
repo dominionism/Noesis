@@ -11,7 +11,7 @@ Noesis is configured via `~/.agents/noesis.yaml`. If the file does not exist, se
 ## Complete Configuration
 
 ```yaml
-# Memory retention period (days) before archival to cold storage
+# Informational retention target for archived memories
 retention_days: 180
 
 # Embedding model identifier
@@ -23,7 +23,7 @@ llm_provider:
   model: claude-sonnet-4-20250514
   api_key_env: ANTHROPIC_API_KEY
 
-# Maximum cold storage size (MB) before pruning
+# Maximum size for optional cold-storage JSONL archives
 cold_storage_max_mb: 50
 
 # Maximum audit log size (MB) before rotation
@@ -49,7 +49,7 @@ projects: {}
 | **Default** | 180 |
 | **Valid range** | > 0 |
 
-Number of days before memories are archived to cold storage (JSONL). Memories remain retrievable from cold storage but are not included in default queries.
+Configured retention target for archived memories. The current runtime keeps archived memories in SQLite, and `noesis gc` uses its own `--older-than` flag rather than reading this setting directly.
 
 ### `embedding_model`
 
@@ -86,7 +86,7 @@ The API key is never stored in the config file. It is always read from the envir
 | **Default** | 50 |
 | **Valid range** | > 0 |
 
-Maximum total size (in MB) of the cold storage directory (`~/.agents/cold/`). When exceeded, the oldest JSONL archives are pruned during garbage collection.
+Maximum total size (in MB) of the optional cold-storage directory (`~/.agents/cold/`). The default daemon/archive path does not populate this directory automatically; it is only relevant to separate cold-storage utilities and manual workflows.
 
 ### `audit_max_mb`
 
@@ -177,20 +177,19 @@ All Noesis state lives under `~/.agents/` (configurable via `NOESIS_HOME`):
 ├── backups/             # Database backups
 ├── models/              # ONNX embedding model files
 ├── inbox/               # Write-back inbox from adapters
+├── prompts/             # Prompt assets
 ├── capsules/            # Task-class operating packs
-├── workflow/            # Workflow state and artifacts
-│   ├── plans/           # Active and archived plans
-│   ├── research/        # Research artifacts
-│   ├── sessions/        # Session checkpoints
-│   ├── handoffs/        # Cross-agent handoffs
-│   ├── debug/           # Persistent debug state
-│   └── deviations/      # Deviation tracking logs
-├── profiles/            # Cognitive profiles
 ├── adapters/            # Per-tool adapter configs
 ├── agents/              # Expert agent definitions
 ├── commands/            # Command definitions
+├── contexts/            # Project/user context entries
 ├── rules/               # Workflow policy rules
 ├── scripts/             # Helper scripts
+├── projects/            # Project metadata
+├── get-shit-done/       # GSD execution state
+├── shell/               # Shell integration
+├── manifest.json        # Adapter manifest
+├── sync.sh              # Sync helper script
 └── hooks/               # Background monitoring hooks
 ```
 
@@ -213,7 +212,7 @@ These values are defined in `src/constants.ts` and are not user-configurable:
 | Constant | Value | Description |
 |----------|-------|-------------|
 | `EMBEDDING_DIMENSIONS` | 384 | Embedding vector dimensionality |
-| `SCHEMA_VERSION` | 2 | Database schema version |
+| `SCHEMA_VERSION` | 3 | Database schema version |
 | `HOT_MEMORY_LINE_LIMIT` | 2,000 | Max lines per hot memory file |
 | `MAX_MEMORIES` | 10,000 | Max memories per database |
 | `MAX_MEMORY_TOKENS` | 2,000 | Max tokens per memory |
@@ -259,7 +258,7 @@ All CLI commands accept these global options:
 | `noesis remember` | Store a new memory |
 | `noesis recall` | Search memories |
 | `noesis forget` | Delete a memory |
-| `noesis correct` | Store a correction as a lesson |
+| `noesis correct` | Store a structured correction as a lesson |
 | `noesis check` | Advisory check against anti-patterns |
 | `noesis gap` | Retrieval gap analysis |
 | `noesis explain` | Full scoring breakdown |
@@ -272,6 +271,7 @@ All CLI commands accept these global options:
 | `noesis research` | Research current state |
 | `noesis critique` | Evidence-backed critique |
 | `noesis verify` | Goal-backward verification |
+| `noesis route` | Expert agent routing |
 | `noesis optimize` | Prompt optimization |
 | `noesis simulate` | Strategy simulation |
 
@@ -281,7 +281,6 @@ All CLI commands accept these global options:
 |---------|-------------|
 | `noesis session` | Session lifecycle management |
 | `noesis handoff` | Cross-agent handoff |
-| `noesis route` | Expert agent routing |
 
 ### Operations Commands
 
@@ -292,7 +291,7 @@ All CLI commands accept these global options:
 | `noesis status` | System health and metrics |
 | `noesis sync` | Bidirectional adapter sync |
 | `noesis import-config` | Import from existing tool configs |
-| `noesis learn` | Run pattern detection and synthesis |
+| `noesis learn` | Process a structured learning event and write back corrections |
 | `noesis skills` | Manage skills and anti-patterns |
 | `noesis audit` | Query audit log |
 | `noesis gc` | Garbage collection (manual only) |

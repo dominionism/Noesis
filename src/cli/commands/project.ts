@@ -2,16 +2,37 @@
  * noesis project — Project management
  *
  * Subcommands: list, add, remove
- * Operates directly on the database.
+ * Operates on the durable Noesis config allowlist used for project-scoped
+ * auto-injection and project-level defaults.
  */
 
 import { Command } from 'commander';
-import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 
-import { DB_PATH } from '../../constants.js';
-import { DatabaseConnection } from '../../core/database.js';
-import { createProject, listProjects } from '../../core/memory-crud.js';
+import { loadConfig, saveConfig } from '../../config.js';
 import type { Sensitivity } from '../../types.js';
+
+interface RegisteredProjectRecord {
+  id: string;
+  name: string;
+  path: string;
+  sensitivity: Sensitivity;
+  isolation_mode: boolean;
+}
+
+function listRegisteredProjects(): RegisteredProjectRecord[] {
+  const config = loadConfig();
+
+  return Object.entries(config.projects)
+    .map(([id, project]) => ({
+      id,
+      name: id,
+      path: project.path,
+      sensitivity: project.sensitivity,
+      isolation_mode: project.isolation_mode,
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
 
 export function registerProjectCommand(program: Command): void {
   const project = program
@@ -24,15 +45,8 @@ export function registerProjectCommand(program: Command): void {
     .action(() => {
       const globalOpts = program.opts();
 
-      if (!existsSync(DB_PATH)) {
-        console.log('Database not found. Run `noesis init` first.');
-        return;
-      }
-
-      let db: DatabaseConnection | null = null;
       try {
-        db = DatabaseConnection.create();
-        const projects = listProjects(db);
+        const projects = listRegisteredProjects();
 
         if (globalOpts.json) {
           console.log(JSON.stringify(projects, null, 2));
@@ -51,8 +65,6 @@ export function registerProjectCommand(program: Command): void {
       } catch (err) {
         console.error(`Error: ${(err as Error).message}`);
         process.exit(1);
-      } finally {
-        db?.close();
       }
     });
 
@@ -67,20 +79,23 @@ export function registerProjectCommand(program: Command): void {
     }) => {
       const globalOpts = program.opts();
 
-      if (!existsSync(DB_PATH)) {
-        console.log('Database not found. Run `noesis init` first.');
-        return;
-      }
-
-      let db: DatabaseConnection | null = null;
       try {
-        db = DatabaseConnection.create();
-        const project = createProject(db, {
+        const config = loadConfig();
+        const projectPath = resolve(path);
+        const project = {
+          id: name,
           name,
-          path,
+          path: projectPath,
           sensitivity: (options.sensitivity as Sensitivity) ?? 'INTERNAL',
           isolation_mode: options.isolated ?? false,
-        });
+        };
+
+        config.projects[name] = {
+          path: project.path,
+          sensitivity: project.sensitivity,
+          isolation_mode: project.isolation_mode,
+        };
+        saveConfig(config);
 
         if (globalOpts.json) {
           console.log(JSON.stringify(project, null, 2));
@@ -92,8 +107,6 @@ export function registerProjectCommand(program: Command): void {
       } catch (err) {
         console.error(`Error: ${(err as Error).message}`);
         process.exit(1);
-      } finally {
-        db?.close();
       }
     });
 
@@ -103,15 +116,10 @@ export function registerProjectCommand(program: Command): void {
     .action((id: string) => {
       const globalOpts = program.opts();
 
-      if (!existsSync(DB_PATH)) {
-        console.log('Database not found. Run `noesis init` first.');
-        return;
-      }
-
-      let db: DatabaseConnection | null = null;
       try {
-        db = DatabaseConnection.create();
-        db.prepare<[string]>('DELETE FROM projects WHERE id = ?').run(id);
+        const config = loadConfig();
+        delete config.projects[id];
+        saveConfig(config);
 
         if (globalOpts.json) {
           console.log(JSON.stringify({ success: true, id }, null, 2));
@@ -121,8 +129,6 @@ export function registerProjectCommand(program: Command): void {
       } catch (err) {
         console.error(`Error: ${(err as Error).message}`);
         process.exit(1);
-      } finally {
-        db?.close();
       }
     });
 }

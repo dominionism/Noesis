@@ -47,6 +47,7 @@ export function registerLearnCommand(program: Command): void {
       failureClass: string;
       trigger: string;
       phase: string;
+      dryRun?: boolean;
       project?: string;
       expertId?: string;
       capsuleId?: string;
@@ -90,8 +91,11 @@ export function registerLearnCommand(program: Command): void {
         if (options.memoryIds) {
           params.memory_ids = options.memoryIds.split(',').map((s: string) => s.trim());
         }
+        if (options.dryRun === true) {
+          params.dry_run = true;
+        }
 
-        console.log('Processing learning event...');
+        console.log(options.dryRun === true ? 'Previewing learning event...' : 'Processing learning event...');
 
         const result = await client.call<{
           classified: string;
@@ -106,7 +110,7 @@ export function registerLearnCommand(program: Command): void {
         if (globalOpts.json) {
           console.log(JSON.stringify(result, null, 2));
         } else {
-          console.log('Learning event processed.\n');
+          console.log(options.dryRun === true ? 'Learning event preview.\n' : 'Learning event processed.\n');
 
           console.log('--- Classification ---');
           console.log(`  Failure class: ${result.classified}`);

@@ -183,18 +183,43 @@ interface CapsuleFrontmatter {
 }
 
 /**
- * Converts a parsed Markdown capsule directory to DeepCapsuleInput and
- * an array of CapsuleComponentInputs.
+ * Converts a parsed CAPSULE.md asset into a DeepCapsuleInput and
+ * capsule components extracted from markdown sections.
  *
- * Expects the main CAPSULE.md plus optional component files:
- * intent.md, assembly.md, anti-patterns.md, critic.md, examples.md,
- * grader.md, memory-policy.md
+ * The current markdown capsule format is a single CAPSULE.md file with
+ * sections such as:
+ * - ## Intent
+ * - ## Assembly
+ * - ## Anti-patterns
+ * - ## Quality Criteria
  */
 export function convertCapsule(
   asset: ParsedAsset,
-): { capsule: DeepCapsuleInput; content: string } {
+): { capsule: DeepCapsuleInput; components: CapsuleComponentInput[]; content: string } {
   const { content, name } = asset;
   const metadata = asset.metadata as CapsuleFrontmatter;
+  const componentSections: Array<[CapsuleComponentType, string[]]> = [
+    ['intent', ['Intent']],
+    ['assembly', ['Assembly']],
+    ['examples', ['Examples']],
+    ['anti_patterns', ['Anti-patterns']],
+    ['critic', ['Critic', 'Critique', 'Review Criteria']],
+    ['grader', ['Quality Criteria', 'Grader', 'Evaluation Criteria']],
+    ['memory_policy', ['Memory Policy']],
+  ];
+  const components = componentSections
+    .map(([componentType, headings]) => ({
+      component_type: componentType,
+      content: extractSectionFromHeadings(content, headings),
+    }))
+    .filter((component): component is { component_type: CapsuleComponentType; content: string } => {
+      return component.content !== null;
+    })
+    .map((component) => ({
+      capsule_id: '',
+      component_type: component.component_type,
+      content: component.content,
+    }));
 
   return {
     capsule: {
@@ -203,6 +228,7 @@ export function convertCapsule(
       description: metadata.description ?? `Capsule for ${name.replace(/-/g, ' ')}`,
       trigger_patterns: metadata.triggers ?? extractKeywords(metadata.description ?? '', name),
     },
+    components,
     content,
   };
 }
@@ -278,6 +304,17 @@ function extractSection(content: string, heading: string): string | null {
   const end = nextHeading === -1 ? content.length : nextHeading;
 
   return content.slice(start, end).trim();
+}
+
+function extractSectionFromHeadings(content: string, headings: string[]): string | null {
+  for (const heading of headings) {
+    const section = extractSection(content, heading);
+    if (section) {
+      return section;
+    }
+  }
+
+  return null;
 }
 
 function extractRuleConstraints(content: string): RuleConstraint[] {

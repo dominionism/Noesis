@@ -62,6 +62,30 @@ export { createAntigravityAdapter } from './antigravity.js';
 export { createOpenClawAdapter } from './openclaw.js';
 export { createGenericAdapter } from './generic.js';
 export type { GenericAdapterOptions } from './generic.js';
+import { createAdapterRegistry } from './interface.js';
+import { createClaudeCodeAdapter } from './claude-code.js';
+import { createCursorAdapter } from './cursor.js';
+import { createCopilotAdapter } from './copilot.js';
+import { createAiderAdapter } from './aider.js';
+import { createCodexAdapter } from './codex.js';
+import { createOpenCodeAdapter } from './opencode.js';
+import { createAntigravityAdapter } from './antigravity.js';
+import { createOpenClawAdapter } from './openclaw.js';
+import { createGenericAdapter } from './generic.js';
+
+export function createDefaultAdapterRegistry() {
+  const registry = createAdapterRegistry();
+  registry.register(createClaudeCodeAdapter());
+  registry.register(createCursorAdapter());
+  registry.register(createCopilotAdapter());
+  registry.register(createAiderAdapter());
+  registry.register(createCodexAdapter());
+  registry.register(createOpenCodeAdapter());
+  registry.register(createAntigravityAdapter());
+  registry.register(createOpenClawAdapter());
+  registry.register(createGenericAdapter());
+  return registry;
+}
 
 // Re-export types for convenience
 export type {

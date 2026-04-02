@@ -274,7 +274,7 @@ describe('createClaudeCodeAdapter', () => {
       const result = await adapter.transform(context, budget);
 
       expect(result.fileWrites).toHaveLength(1);
-      expect(result.fileWrites[0].path).toBe('CLAUDE.md');
+      expect(result.fileWrites[0].path).toBe('Context/CLAUDE.md');
       expect(result.fileWrites[0].managedSection).toBe(true);
       expect(result.fileWrites[0].adapterId).toBe('claude-code');
       expect(result.tokensUsed).toBeGreaterThan(0);

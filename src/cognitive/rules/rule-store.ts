@@ -177,17 +177,17 @@ export function updateRule(
   const name = updates.name ?? existing.name;
   const category = updates.category ?? existing.category;
   const description = updates.description ?? existing.description;
-  const triggerConditions = updates.trigger_conditions
+  const triggerConditions = updates.trigger_conditions !== undefined
     ? JSON.stringify(updates.trigger_conditions)
     : existing.trigger_conditions;
-  const constraints = updates.constraints
+  const constraints = updates.constraints !== undefined
     ? JSON.stringify(updates.constraints)
     : existing.constraints;
   const enforcement = updates.enforcement ?? existing.enforcement;
-  const thresholds = updates.thresholds
+  const thresholds = updates.thresholds !== undefined
     ? JSON.stringify(updates.thresholds)
     : existing.thresholds;
-  const interactions = updates.interactions
+  const interactions = updates.interactions !== undefined
     ? JSON.stringify(updates.interactions)
     : existing.interactions;
   const version = updates.version ?? existing.version;

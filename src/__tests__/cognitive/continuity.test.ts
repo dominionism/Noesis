@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { DatabaseConnection } from '../../core/database.js';
+import { getMemory } from '../../core/memory-crud.js';
 
 // Session Manager
 import {
@@ -50,6 +51,13 @@ import {
 import type { HandoffInput } from '../../types.js';
 
 const sign = (content: string) => `sig_${content.length}`;
+const signMemory = (memory: {
+  id: string;
+  type: string;
+  title: string;
+  content: string;
+  project_id: string | null;
+}) => `memsig_${memory.id}_${memory.type}_${memory.title}_${memory.project_id ?? 'null'}_${memory.content}`;
 
 function createTestDb(): { db: DatabaseConnection; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), 'noesis-continuity-test-'));
@@ -166,43 +174,67 @@ describe('Continuity System', () => {
       expect(session!.agent).toBe('agent-beta');
     });
 
-    it('should create a session checkpoint', () => {
+    it('should create a session checkpoint', async () => {
       const { db } = setup();
       startSession(db, PROJECT_ID, 'agent-alpha', sign);
 
-      const checkpointId = createSessionCheckpoint(db, PROJECT_ID, {
+      const checkpointId = await createSessionCheckpoint(db, PROJECT_ID, {
         task_description: 'Implement auth module',
         completed_steps: ['Created schema', 'Added migrations'],
         remaining_steps: ['Add endpoints', 'Write tests'],
         current_blockers: [],
         relevant_files: ['src/auth.ts'],
         working_state: 'In progress',
-      }, sign);
+      }, signMemory);
 
       expect(checkpointId).toBeTruthy();
     });
 
-    it('should retrieve latest checkpoint', () => {
+    it('should sign checkpoint memories with canonical fields', async () => {
       const { db } = setup();
       startSession(db, PROJECT_ID, 'agent-alpha', sign);
 
-      createSessionCheckpoint(db, PROJECT_ID, {
+      const checkpointId = await createSessionCheckpoint(db, PROJECT_ID, {
+        task_description: 'Implement auth module',
+        completed_steps: ['Created schema'],
+        remaining_steps: ['Add endpoints'],
+        current_blockers: [],
+        relevant_files: ['src/auth.ts'],
+        working_state: 'In progress',
+      }, signMemory);
+
+      const checkpoint = getMemory(db, checkpointId);
+      expect(checkpoint).not.toBeNull();
+      expect(checkpoint!.signature).toBe(signMemory({
+        id: checkpointId,
+        type: 'checkpoint',
+        title: 'Checkpoint: Implement auth module',
+        content: checkpoint!.content,
+        project_id: PROJECT_ID,
+      }));
+    });
+
+    it('should retrieve latest checkpoint', async () => {
+      const { db } = setup();
+      startSession(db, PROJECT_ID, 'agent-alpha', sign);
+
+      await createSessionCheckpoint(db, PROJECT_ID, {
         task_description: 'First checkpoint',
         completed_steps: ['Step A'],
         remaining_steps: ['Step B'],
         current_blockers: [],
         relevant_files: [],
         working_state: 'starting',
-      }, sign);
+      }, signMemory);
 
-      createSessionCheckpoint(db, PROJECT_ID, {
+      await createSessionCheckpoint(db, PROJECT_ID, {
         task_description: 'Second checkpoint',
         completed_steps: ['Step A', 'Step B'],
         remaining_steps: ['Step C'],
         current_blockers: [],
         relevant_files: [],
         working_state: 'midway',
-      }, sign);
+      }, signMemory);
 
       const latest = getLatestCheckpoint(db, PROJECT_ID);
       expect(latest).not.toBeNull();
@@ -229,9 +261,9 @@ describe('Continuity System', () => {
       memory_refs: [],
     };
 
-    it('should create a handoff', () => {
+    it('should create a handoff', async () => {
       const { db } = setup();
-      const handoff = createHandoff(db, sampleHandoff, PROJECT_ID, sign);
+      const handoff = await createHandoff(db, sampleHandoff, PROJECT_ID, signMemory);
 
       expect(handoff.id).toBeTruthy();
       expect(handoff.source_agent).toBe('agent-alpha');
@@ -240,19 +272,19 @@ describe('Continuity System', () => {
       expect(handoff.priority).toBe('immediate');
     });
 
-    it('should use default priority', () => {
+    it('should use default priority', async () => {
       const { db } = setup();
-      const handoff = createHandoff(db, {
+      const handoff = await createHandoff(db, {
         ...sampleHandoff,
         priority: undefined,
-      }, PROJECT_ID, sign);
+      }, PROJECT_ID, signMemory);
 
       expect(handoff.priority).toBe('normal');
     });
 
-    it('should resume from handoff', () => {
+    it('should resume from handoff', async () => {
       const { db } = setup();
-      const created = createHandoff(db, sampleHandoff, PROJECT_ID, sign);
+      const created = await createHandoff(db, sampleHandoff, PROJECT_ID, signMemory);
 
       const resumed = resumeFromHandoff(db, created.id);
       expect(resumed).not.toBeNull();
@@ -265,40 +297,40 @@ describe('Continuity System', () => {
       expect(resumeFromHandoff(db, 'nonexistent')).toBeNull();
     });
 
-    it('should list handoffs for a project', () => {
+    it('should list handoffs for a project', async () => {
       const { db } = setup();
-      createHandoff(db, sampleHandoff, PROJECT_ID, sign);
-      createHandoff(db, {
+      await createHandoff(db, sampleHandoff, PROJECT_ID, signMemory);
+      await createHandoff(db, {
         ...sampleHandoff,
         source_agent: 'agent-beta',
         target_agent: 'agent-gamma',
         reason: 'session_end',
-      }, PROJECT_ID, sign);
+      }, PROJECT_ID, signMemory);
 
       const handoffs = listHandoffs(db, PROJECT_ID);
       expect(handoffs).toHaveLength(2);
     });
 
-    it('should limit listed handoffs', () => {
+    it('should limit listed handoffs', async () => {
       const { db } = setup();
-      createHandoff(db, sampleHandoff, PROJECT_ID, sign);
-      createHandoff(db, { ...sampleHandoff, reason: 'session_end' }, PROJECT_ID, sign);
-      createHandoff(db, { ...sampleHandoff, reason: 'tool_switch' }, PROJECT_ID, sign);
+      await createHandoff(db, sampleHandoff, PROJECT_ID, signMemory);
+      await createHandoff(db, { ...sampleHandoff, reason: 'session_end' }, PROJECT_ID, signMemory);
+      await createHandoff(db, { ...sampleHandoff, reason: 'tool_switch' }, PROJECT_ID, signMemory);
 
       const handoffs = listHandoffs(db, PROJECT_ID, 2);
       expect(handoffs).toHaveLength(2);
     });
 
-    it('should not list handoffs from other projects', () => {
+    it('should not list handoffs from other projects', async () => {
       const { db } = setup();
-      createHandoff(db, sampleHandoff, PROJECT_ID, sign);
-      createHandoff(db, sampleHandoff, 'other-project', sign);
+      await createHandoff(db, sampleHandoff, PROJECT_ID, signMemory);
+      await createHandoff(db, sampleHandoff, 'other-project', signMemory);
 
       const handoffs = listHandoffs(db, PROJECT_ID);
       expect(handoffs).toHaveLength(1);
     });
 
-    it('should resolve memory refs', () => {
+    it('should resolve memory refs', async () => {
       const { db } = setup();
       const now = new Date().toISOString();
 
@@ -308,30 +340,30 @@ describe('Continuity System', () => {
         VALUES (?, 'task', ?, ?, ?, ?, ?, ?)
       `).run('mem-ref-1', 'Schema Design', 'Designed the database schema', 'sig_test', now, now, now);
 
-      const handoff = createHandoff(db, {
+      const handoff = await createHandoff(db, {
         ...sampleHandoff,
         memory_refs: ['mem-ref-1'],
-      }, PROJECT_ID, sign);
+      }, PROJECT_ID, signMemory);
 
       const memories = getHandoffMemories(db, handoff);
       expect(memories).toHaveLength(1);
       expect(memories[0].title).toBe('Schema Design');
     });
 
-    it('should skip missing memory refs', () => {
+    it('should skip missing memory refs', async () => {
       const { db } = setup();
-      const handoff = createHandoff(db, {
+      const handoff = await createHandoff(db, {
         ...sampleHandoff,
         memory_refs: ['nonexistent-mem'],
-      }, PROJECT_ID, sign);
+      }, PROJECT_ID, signMemory);
 
       const memories = getHandoffMemories(db, handoff);
       expect(memories).toHaveLength(0);
     });
 
-    it('should format handoff resumption', () => {
+    it('should format handoff resumption', async () => {
       const { db } = setup();
-      const handoff = createHandoff(db, sampleHandoff, PROJECT_ID, sign);
+      const handoff = await createHandoff(db, sampleHandoff, PROJECT_ID, signMemory);
 
       const formatted = formatHandoffResumption(handoff, []);
       expect(formatted).toContain('agent-alpha');
@@ -339,15 +371,30 @@ describe('Continuity System', () => {
       expect(formatted).toContain('schema design');
     });
 
-    it('should format resumption with referenced memories', () => {
+    it('should format resumption with referenced memories', async () => {
       const { db } = setup();
-      const handoff = createHandoff(db, sampleHandoff, PROJECT_ID, sign);
+      const handoff = await createHandoff(db, sampleHandoff, PROJECT_ID, signMemory);
 
       const formatted = formatHandoffResumption(handoff, [
         { id: 'mem-1', title: 'Schema Design', content: 'Designed tables for auth module' },
       ]);
       expect(formatted).toContain('Referenced Context');
       expect(formatted).toContain('Schema Design');
+    });
+
+    it('should sign handoff memories with canonical fields', async () => {
+      const { db } = setup();
+      const handoff = await createHandoff(db, sampleHandoff, PROJECT_ID, signMemory);
+      const memory = getMemory(db, handoff.id);
+
+      expect(memory).not.toBeNull();
+      expect(memory!.signature).toBe(signMemory({
+        id: handoff.id,
+        type: 'checkpoint',
+        title: 'Handoff: agent-alpha → agent-beta (context_limit)',
+        content: memory!.content,
+        project_id: PROJECT_ID,
+      }));
     });
   });
 

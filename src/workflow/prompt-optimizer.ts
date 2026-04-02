@@ -10,7 +10,18 @@
  */
 
 import type { PromptShape, RecallResult } from '../types.js';
-import type { CapsuleDefinition } from './capsule-router.js';
+
+/**
+ * Minimal capsule shape needed by enrichWithCapsule.
+ * The full capsule-router has been removed in favor of the cognitive layer's
+ * capsule-engine. This interface is kept for prompt-optimizer compatibility.
+ */
+export interface CapsuleDefinition {
+  displayName: string;
+  description: string;
+  antiPatterns: string[];
+  criticRules: string[];
+}
 
 /**
  * Raw user input to be optimized into a structured prompt.

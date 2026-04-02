@@ -156,7 +156,20 @@ export function replaceManagedSection(
     return fileContent.replace(regex, newSection);
   }
 
+  // Fall back to legacy format used by the noesis-inject script:
+  //   <!-- NOESIS:BEGIN --> ... <!-- NOESIS:END -->
+  // Replace it with the richer managed-section format so both tools
+  // converge on the same marker standard after the first sync.
+  const legacyRegex = /<!-- NOESIS:BEGIN -->[\s\S]*?<!-- NOESIS:END -->/;
+  if (legacyRegex.test(fileContent)) {
+    return fileContent.replace(legacyRegex, newSection);
+  }
+
   // No existing section found; append
+  if (fileContent.length === 0) {
+    return newSection;
+  }
+
   const separator = fileContent.length > 0 && !fileContent.endsWith('\n') ? '\n\n' : '\n';
   return fileContent + separator + newSection;
 }

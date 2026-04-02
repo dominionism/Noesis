@@ -1,15 +1,17 @@
 /**
  * OpenCode Adapter
  *
- * Target: AGENTS.md
+ * Canonical target: Context/AGENTS.md
+ * Compatibility bridge: AGENTS.md
  * Budget: 20K tokens
  * Write-back: File append
  * Session: No session support
  *
- * OpenCode reads instructions from AGENTS.md. This adapter shares the
- * target file with Codex CLI but uses a distinct adapter ID so both
- * can coexist with separate managed sections. Content is formatted
- * in a frontmatter-compatible style.
+ * OpenCode reads instructions from AGENTS.md. Noesis stores the managed
+ * project copy in Context/AGENTS.md and the sync layer creates a repo-root
+ * compatibility bridge at AGENTS.md. This adapter shares the canonical file
+ * with Codex CLI but uses a distinct adapter ID so both can coexist with
+ * separate managed sections. Content is formatted in a frontmatter-compatible style.
  *
  * Detection looks for:
  * - .opencode/ directory
@@ -47,7 +49,7 @@ import type { CognitiveEnrichment } from './base-adapter.js';
 const ADAPTER_ID = 'opencode';
 const DISPLAY_NAME = 'OpenCode';
 const VERSION = '1.0.0';
-const TARGET_FILE = 'AGENTS.md';
+const TARGET_FILE = 'Context/AGENTS.md';
 const DETECTION_PATHS = ['.opencode', 'opencode.json'];
 const CONFIG_PATH = '.opencode/config.json';
 

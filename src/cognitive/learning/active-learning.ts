@@ -17,7 +17,7 @@
  */
 
 import type { DatabaseConnection } from '../../core/database.js';
-import type { SignFn, ContextType, ReasoningPhase } from '../types.js';
+import type { SignFn, ContextType, ReasoningPhase, MemorySignFn } from '../types.js';
 import type { LearningTriggerType } from '../../types.js';
 import type { CognitiveFailureClass } from './failure-classifier.js';
 import { classifyFailure } from './failure-classifier.js';
@@ -30,6 +30,8 @@ import {
   type RuleWritebackResult,
 } from './writeback-engine.js';
 import { trackGateEffectiveness } from './effectiveness-tracker.js';
+import { classifyFailure as classifyLesson, captureLesson as captureLessonOutput } from '../../intelligence/lesson-capture.js';
+import { captureLesson as captureToLearningLoop } from '../../intelligence/learning-loop.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,6 +50,7 @@ export interface LearningEventInput {
   ruleIds?: string[];
   memoryIds?: string[];
   projectId?: string | null;
+  dryRun?: boolean;
 }
 
 export interface LearningEventResult {
@@ -79,8 +82,36 @@ export function processLearningEvent(
   db: DatabaseConnection,
   event: LearningEventInput,
   sign: SignFn,
+  signMemory?: MemorySignFn,
 ): LearningEventResult {
   const projectId = event.projectId ?? null;
+
+  // Step 0: Enhanced classification via intelligence/lesson-capture
+  try {
+    const lessonTrigger = {
+      type: 'correction' as const,
+      description: event.description,
+      evidence: [event.rootCause, event.preventionRule],
+      context: `Phase: ${event.phase}, Class: ${event.failureClass}`,
+    };
+    const classifiedLesson = classifyLesson(lessonTrigger);
+    const lessonOutput = captureLessonOutput(lessonTrigger);
+
+    // Persist lesson via intelligence/learning-loop if signMemory available
+    if (signMemory && !event.dryRun) {
+      try {
+        captureToLearningLoop(db, {
+          description: event.description,
+          rootCause: event.rootCause,
+          preventionRule: event.preventionRule,
+          triggerType: event.trigger,
+          failureClass: classifiedLesson.failureClass as never,
+          causalChainIds: event.memoryIds ?? [],
+          projectId: projectId ?? undefined,
+        }, signMemory);
+      } catch { /* non-fatal — learning-loop persistence is additive */ }
+    }
+  } catch { /* non-fatal — enhanced classification is additive */ }
 
   // Step 1: Classify (refine the provided failure class)
   const classification = classifyFailure(event.description, {
@@ -95,6 +126,18 @@ export function processLearningEvent(
   const effectiveClass = classification.confidence >= 0.5
     ? classification.failureClass
     : event.failureClass;
+
+  if (event.dryRun === true) {
+    return {
+      classified: effectiveClass,
+      classificationConfidence: classification.confidence,
+      ruleAction: 'none',
+      contextsUpdated: ['failure_patterns', 'lessons_learned'],
+      expertUpdated: event.expertId !== undefined,
+      capsuleUpdated: event.capsuleId !== undefined,
+      skillsUpdated: (event.skillIds?.length ?? 0) > 0,
+    };
+  }
 
   // Step 2: Write back to rules
   const ruleResult = writebackToRules(db, effectiveClass, {

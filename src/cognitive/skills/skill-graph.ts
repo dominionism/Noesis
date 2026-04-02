@@ -5,7 +5,7 @@
  * their structure. This allows smaller models to fill bounded
  * slots within a graph instead of improvising entire workflows.
  *
- * ABILITIES.md Improvement #4: Skills as executable graphs.
+ * Treats reusable skills as executable graphs.
  */
 
 import type { SkillGraph, SkillGraphStep } from '../types.js';

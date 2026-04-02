@@ -63,6 +63,13 @@ import type { HandoffInput } from '../../../types.js';
 import { generateId } from '../../../core/ulid.js';
 
 const sign = (content: string) => `sig_${content.length}`;
+const signMemory = (memory: {
+  id: string;
+  type: string;
+  title: string;
+  content: string;
+  project_id: string | null;
+}) => `memsig_${memory.id}_${memory.type}_${memory.title}_${memory.project_id ?? 'null'}_${memory.content}`;
 const PROJECT_ID = 'proj-continuity-test';
 
 function createTestDb(): { db: DatabaseConnection; dir: string } {
@@ -94,7 +101,7 @@ describe('Cross-Session Continuity Integration', () => {
   // --------------------------------------------------------------------------
 
   describe('Complete session lifecycle', () => {
-    it('session 1: start → work → checkpoint → end', () => {
+    it('session 1: start → work → checkpoint → end', async () => {
       const { db } = setup();
 
       // Start session
@@ -115,14 +122,14 @@ describe('Cross-Session Continuity Integration', () => {
       expect(updated.decisions_made).toHaveLength(2);
 
       // Create checkpoint
-      const checkpointId = createSessionCheckpoint(db, PROJECT_ID, {
+      const checkpointId = await createSessionCheckpoint(db, PROJECT_ID, {
         task_description: 'Implement JWT authentication',
         completed_steps: ['Created auth module', 'Added JWT signing'],
         remaining_steps: ['Add token refresh', 'Write tests'],
         current_blockers: [],
         relevant_files: ['src/auth.ts'],
         working_state: 'In progress',
-      }, sign);
+      }, signMemory);
       expect(checkpointId).toBeTruthy();
 
       // End session
@@ -132,7 +139,7 @@ describe('Cross-Session Continuity Integration', () => {
       expect(ended.current_phase).toBe('ended');
     });
 
-    it('session 2: resume from checkpoint', () => {
+    it('session 2: resume from checkpoint', async () => {
       const { db } = setup();
 
       // Setup session 1
@@ -142,14 +149,14 @@ describe('Cross-Session Continuity Integration', () => {
         working_set: ['src/auth.ts'],
         decisions_made: ['Use JWT'],
       }, sign);
-      createSessionCheckpoint(db, PROJECT_ID, {
+      await createSessionCheckpoint(db, PROJECT_ID, {
         task_description: 'Implement JWT authentication',
         completed_steps: ['JWT signing done'],
         remaining_steps: ['Token refresh', 'Tests'],
         current_blockers: [],
         relevant_files: ['src/auth.ts'],
         working_state: 'In progress',
-      }, sign);
+      }, signMemory);
       endSession(db, PROJECT_ID, 'Session 1 done', sign);
 
       // Start session 2
@@ -170,7 +177,7 @@ describe('Cross-Session Continuity Integration', () => {
   // --------------------------------------------------------------------------
 
   describe('Agent handoff', () => {
-    it('creates handoff, resumes in new session, memories available', () => {
+    it('creates handoff, resumes in new session, memories available', async () => {
       const { db } = setup();
       const now = new Date().toISOString();
 
@@ -182,14 +189,14 @@ describe('Cross-Session Continuity Integration', () => {
 
       // Session 1 creates handoff
       startSession(db, PROJECT_ID, 'agent-alpha', sign);
-      const handoff = createHandoff(db, {
+      const handoff = await createHandoff(db, {
         source_agent: 'agent-alpha',
         target_agent: 'agent-beta',
         reason: 'context_limit',
         priority: 'immediate',
         state_summary: 'Completed JWT signing, need refresh token implementation and test coverage.',
         memory_refs: ['mem-handoff-1'],
-      }, PROJECT_ID, sign);
+      }, PROJECT_ID, signMemory);
 
       expect(handoff.id).toBeTruthy();
       expect(handoff.priority).toBe('immediate');
@@ -223,13 +230,13 @@ describe('Cross-Session Continuity Integration', () => {
         source_agent: 'a', target_agent: 'b',
         reason: 'context_limit', state_summary: 'First',
         memory_refs: [],
-      }, PROJECT_ID, sign);
+      }, PROJECT_ID, signMemory);
 
       const h2 = createHandoff(db, {
         source_agent: 'b', target_agent: 'c',
         reason: 'session_end', state_summary: 'Second',
         memory_refs: [],
-      }, PROJECT_ID, sign);
+      }, PROJECT_ID, signMemory);
 
       const handoffs = listHandoffs(db, PROJECT_ID);
       expect(handoffs).toHaveLength(2);
@@ -341,37 +348,37 @@ describe('Cross-Session Continuity Integration', () => {
   // --------------------------------------------------------------------------
 
   describe('Multiple checkpoints', () => {
-    it('getLatestCheckpoint returns the most recent checkpoint', () => {
+    it('getLatestCheckpoint returns the most recent checkpoint', async () => {
       const { db } = setup();
 
       startSession(db, PROJECT_ID, 'agent-1', sign);
 
-      createSessionCheckpoint(db, PROJECT_ID, {
+      await createSessionCheckpoint(db, PROJECT_ID, {
         task_description: 'Phase 1: Schema design',
         completed_steps: ['ERD created'],
         remaining_steps: ['Migrations', 'Endpoints'],
         current_blockers: [],
         relevant_files: [],
         working_state: 'phase-1',
-      }, sign);
+      }, signMemory);
 
-      createSessionCheckpoint(db, PROJECT_ID, {
+      await createSessionCheckpoint(db, PROJECT_ID, {
         task_description: 'Phase 2: API endpoints',
         completed_steps: ['ERD created', 'Migrations done'],
         remaining_steps: ['Endpoints'],
         current_blockers: [],
         relevant_files: ['src/routes.ts'],
         working_state: 'phase-2',
-      }, sign);
+      }, signMemory);
 
-      createSessionCheckpoint(db, PROJECT_ID, {
+      await createSessionCheckpoint(db, PROJECT_ID, {
         task_description: 'Phase 3: Testing',
         completed_steps: ['ERD created', 'Migrations done', 'Endpoints done'],
         remaining_steps: ['Integration tests'],
         current_blockers: ['Need test fixtures'],
         relevant_files: ['src/routes.ts', 'src/__tests__/routes.test.ts'],
         working_state: 'phase-3',
-      }, sign);
+      }, signMemory);
 
       const latest = getLatestCheckpoint(db, PROJECT_ID);
       expect(latest).not.toBeNull();
@@ -391,14 +398,13 @@ describe('Cross-Session Continuity Integration', () => {
       const { db } = setup();
       seedBuiltInContexts(db, sign);
 
-      // Document decisions (writes to decision_records table)
+      // Document decisions (writes to context_state with project scope)
       documentDecision(db, PROJECT_ID, 'Use REST API', 'Simpler for MVP', sign);
 
-      // Assemble contexts — should include decisions template
-      const { contexts } = assembleContexts(db, null, 100000);
+      // Assemble contexts with project scope — should include decisions
+      const { contexts } = assembleContexts(db, PROJECT_ID, 100000);
       const decisionsCtx = contexts.find(c => c.context_type === 'decisions');
       expect(decisionsCtx).toBeDefined();
-      // The built-in template is a template, actual decisions are in decision_records
     });
   });
 
@@ -407,7 +413,7 @@ describe('Cross-Session Continuity Integration', () => {
   // --------------------------------------------------------------------------
 
   describe('Handoff preserves decision context', () => {
-    it('decisions survive handoff between agents', () => {
+    it('decisions survive handoff between agents', async () => {
       const { db } = setup();
 
       // Agent 1 makes decisions
@@ -416,13 +422,13 @@ describe('Cross-Session Continuity Integration', () => {
       documentDecision(db, PROJECT_ID, 'Redis for pub/sub', 'Low latency messaging', sign);
 
       // Create handoff
-      createHandoff(db, {
+      await createHandoff(db, {
         source_agent: 'planner',
         target_agent: 'implementer',
         reason: 'session_end',
         state_summary: 'Architecture decided, ready for implementation.',
         memory_refs: [],
-      }, PROJECT_ID, sign);
+      }, PROJECT_ID, signMemory);
       endSession(db, PROJECT_ID, 'Planning complete', sign);
 
       // Agent 2 picks up

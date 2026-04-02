@@ -20,6 +20,8 @@ import { parse as parseYaml } from 'yaml';
 // Core types
 // ---------------------------------------------------------------------------
 
+export type AssetSource = 'bundled' | 'user';
+
 export interface ParsedAsset<T = Record<string, unknown>> {
   /** Parsed YAML frontmatter */
   metadata: T;
@@ -29,6 +31,8 @@ export interface ParsedAsset<T = Record<string, unknown>> {
   sourcePath: string;
   /** Filename without extension */
   name: string;
+  /** Logical asset source */
+  sourceType: AssetSource;
 }
 
 export interface LoaderOptions {
@@ -85,9 +89,21 @@ export function parseFrontmatter(raw: string): { metadata: Record<string, unknow
  */
 export function loadAssetsFromDirectory<T = Record<string, unknown>>(
   dirPath: string,
-  options: LoaderOptions & { nested?: boolean; nestedFilename?: string } = {},
+  options: LoaderOptions & {
+    nested?: boolean;
+    nestedFilename?: string;
+    nestedFilenames?: string[];
+    sourceType?: AssetSource;
+  } = {},
 ): ParsedAsset<T>[] {
-  const { filter, extension = '.md', nested = false, nestedFilename } = options;
+  const {
+    filter,
+    extension = '.md',
+    nested = false,
+    nestedFilename,
+    nestedFilenames,
+    sourceType = 'bundled',
+  } = options;
 
   if (!existsSync(dirPath)) {
     return [];
@@ -95,15 +111,16 @@ export function loadAssetsFromDirectory<T = Record<string, unknown>>(
 
   const assets: ParsedAsset<T>[] = [];
 
-  if (nested && nestedFilename) {
+  if (nested) {
+    const candidateFilenames = nestedFilenames ?? (nestedFilename ? [nestedFilename] : []);
     // Nested: each subdirectory contains a specific file (e.g., skills/tdd-cycle/SKILL.md)
     const entries = readdirSync(dirPath, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       if (filter && !filter.includes(entry.name)) continue;
 
-      const filePath = join(dirPath, entry.name, nestedFilename);
-      if (!existsSync(filePath)) continue;
+      const filePath = resolveNestedAssetPath(join(dirPath, entry.name), candidateFilenames);
+      if (!filePath) continue;
 
       const raw = readFileSync(filePath, 'utf-8');
       const { metadata, content } = parseFrontmatter(raw);
@@ -113,6 +130,7 @@ export function loadAssetsFromDirectory<T = Record<string, unknown>>(
         content,
         sourcePath: filePath,
         name: (metadata as Record<string, unknown>).name as string ?? entry.name,
+        sourceType,
       });
     }
   } else {
@@ -134,6 +152,7 @@ export function loadAssetsFromDirectory<T = Record<string, unknown>>(
         content,
         sourcePath: filePath,
         name: (metadata as Record<string, unknown>).name as string ?? nameWithoutExt,
+        sourceType,
       });
     }
   }
@@ -146,25 +165,80 @@ export function loadAssetsFromDirectory<T = Record<string, unknown>>(
 // ---------------------------------------------------------------------------
 
 /**
+ * Loads assets from bundled and user directories in source priority order.
+ *
+ * The returned list preserves source order so callers can process bundled
+ * assets first, then user overrides, while still surfacing diagnostics for
+ * every source file encountered.
+ */
+export function loadAssetsInPriorityOrder<T = Record<string, unknown>>(
+  bundledDir: string,
+  userDir: string,
+  options: LoaderOptions & {
+    nested?: boolean;
+    nestedFilename?: string;
+    nestedFilenames?: string[];
+  } = {},
+): ParsedAsset<T>[] {
+  const bundled = loadAssetsFromDirectory<T>(bundledDir, {
+    ...options,
+    sourceType: 'bundled',
+  });
+  const user = loadAssetsFromDirectory<T>(userDir, {
+    ...options,
+    sourceType: 'user',
+  });
+
+  return [...bundled, ...user];
+}
+
+/**
  * Loads assets from both bundled and user directories, with user files
  * taking precedence when names collide.
  */
 export function loadAssetsWithOverrides<T = Record<string, unknown>>(
   bundledDir: string,
   userDir: string,
-  options: LoaderOptions & { nested?: boolean; nestedFilename?: string } = {},
+  options: LoaderOptions & {
+    nested?: boolean;
+    nestedFilename?: string;
+    nestedFilenames?: string[];
+  } = {},
 ): ParsedAsset<T>[] {
-  const bundled = loadAssetsFromDirectory<T>(bundledDir, options);
-  const user = loadAssetsFromDirectory<T>(userDir, options);
+  const ordered = loadAssetsInPriorityOrder<T>(bundledDir, userDir, options);
 
   // User files override bundled files by name
   const byName = new Map<string, ParsedAsset<T>>();
-  for (const asset of bundled) {
+  for (const asset of ordered) {
     byName.set(asset.name, asset);
-  }
-  for (const asset of user) {
-    byName.set(asset.name, asset); // Override
   }
 
   return Array.from(byName.values());
+}
+
+function resolveNestedAssetPath(
+  subdirectoryPath: string,
+  candidateFilenames: string[],
+): string | null {
+  if (candidateFilenames.length === 0 || !statSync(subdirectoryPath).isDirectory()) {
+    return null;
+  }
+
+  const files = readdirSync(subdirectoryPath, { withFileTypes: true })
+    .filter(entry => entry.isFile());
+  const fileNames = new Set(files.map(file => file.name));
+  const fileNamesByLowerCase = new Map(files.map(file => [file.name.toLowerCase(), file.name]));
+
+  for (const candidate of candidateFilenames) {
+    if (fileNames.has(candidate)) {
+      return join(subdirectoryPath, candidate);
+    }
+
+    const caseInsensitiveMatch = fileNamesByLowerCase.get(candidate.toLowerCase());
+    if (caseInsensitiveMatch) {
+      return join(subdirectoryPath, caseInsensitiveMatch);
+    }
+  }
+
+  return null;
 }

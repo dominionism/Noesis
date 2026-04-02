@@ -534,8 +534,16 @@ export interface ComplianceContext {
 
 export type SignFn = (content: string) => string;
 
+export type MemorySignFn = (memory: {
+  id: string;
+  type: string;
+  title: string;
+  content: string;
+  project_id: string | null;
+}) => string;
+
 // ---------------------------------------------------------------------------
-// Executable Skill Graphs (ABILITIES.md Improvement #4)
+// Executable skill graphs
 // ---------------------------------------------------------------------------
 
 /**

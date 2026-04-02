@@ -16,7 +16,7 @@ import { DatabaseConnection } from '../../core/database.js';
 import { createRpcHandler } from '../../daemon/rpc.js';
 import type { JsonRpcResponse, RpcDependencies } from '../../daemon/rpc.js';
 import { eventBus } from '../../daemon/events.js';
-import { getMemory } from '../../core/memory-crud.js';
+import { createMemory, getMemory } from '../../core/memory-crud.js';
 
 let db: DatabaseConnection;
 let tempDir: string;
@@ -364,6 +364,64 @@ describe('quality gate methods', () => {
 });
 
 // ===========================================================================
+// Gate effectiveness methods
+// ===========================================================================
+
+describe('gate effectiveness methods', () => {
+  it('getEffectivenessMetrics returns cross-gate summary', async () => {
+    const { trackGateEffectiveness } = await import('../../cognitive/learning/effectiveness-tracker.js');
+
+    trackGateEffectiveness(db, 'readiness', true, 'success');
+    trackGateEffectiveness(db, 'readiness', true, 'failure');
+    trackGateEffectiveness(db, 'verification', false, 'success');
+
+    const res = await handle(rpc('noesis.getEffectivenessMetrics'));
+    expect(res.error).toBeUndefined();
+
+    const result = res.result as {
+      gates: {
+        readiness: { metrics: { total: number; falsePassRate: number } };
+        verification: { metrics: { total: number; falseBlockRate: number } };
+      };
+      overall: { total: number };
+    };
+
+    expect(result.gates.readiness.metrics.total).toBe(2);
+    expect(result.gates.readiness.metrics.falsePassRate).toBeCloseTo(0.5, 5);
+    expect(result.gates.verification.metrics.total).toBe(1);
+    expect(result.gates.verification.metrics.falseBlockRate).toBeCloseTo(1, 5);
+    expect(result.overall.total).toBe(3);
+  });
+
+  it('getEffectivenessMetrics filters to a specific gate', async () => {
+    const { trackGateEffectiveness } = await import('../../cognitive/learning/effectiveness-tracker.js');
+
+    trackGateEffectiveness(db, 'readiness', true, 'failure');
+    trackGateEffectiveness(db, 'output_quality', false, 'success');
+
+    const res = await handle(rpc('noesis.getEffectivenessMetrics', { gate_type: 'readiness' }));
+    expect(res.error).toBeUndefined();
+
+    const result = res.result as {
+      gate_type: string;
+      metrics: { total: number; falsePassRate: number };
+      suggestion: { action: string };
+    };
+
+    expect(result.gate_type).toBe('readiness');
+    expect(result.metrics.total).toBe(1);
+    expect(result.metrics.falsePassRate).toBeCloseTo(1, 5);
+    expect(result.suggestion.action).toBe('none');
+  });
+
+  it('getEffectivenessMetrics rejects unknown gate types', async () => {
+    const res = await handle(rpc('noesis.getEffectivenessMetrics', { gate_type: 'unknown' }));
+    expect(res.error).toBeDefined();
+    expect(res.error?.code).toBe(-32602);
+  });
+});
+
+// ===========================================================================
 // Prediction methods
 // ===========================================================================
 
@@ -437,6 +495,26 @@ describe('GSD execution methods', () => {
     expect(result.id).toBeDefined();
     expect(result.project_id).toBe('test-project');
     expect(result.status).toBe('pending');
+  });
+
+  it('createGsdProject links execution state to a persisted plan id when provided', async () => {
+    const res = await handle(rpc('noesis.createGsdProject', {
+      project_id: 'test-project-plan-link',
+      description: 'Test project with plan',
+      plan_id: 'plan-123',
+    }));
+    expect(res.error).toBeUndefined();
+
+    const result = res.result as { plan_id: string | null };
+    expect(result.plan_id).toBe('plan-123');
+
+    const stateRes = await handle(rpc('noesis.getGsdState', {
+      project_id: 'test-project-plan-link',
+    }));
+    expect(stateRes.error).toBeUndefined();
+
+    const state = stateRes.result as { execution: { plan_id: string | null } };
+    expect(state.execution.plan_id).toBe('plan-123');
   });
 
   it('getGsdState returns execution and progress', async () => {
@@ -653,6 +731,49 @@ describe('orchestration methods', () => {
     expect(result.skills).toBeDefined();
     expect(result.contexts).toBeDefined();
     expect(result.token_budget).toBeDefined();
+  });
+
+  it('orchestrate uses injected retrieval integrity dependencies', async () => {
+    const embed = vi.fn().mockResolvedValue(new Float32Array(384));
+    const verifySignature = vi.fn().mockReturnValue({ valid: true, tampered: false });
+    const scanSecrets = vi.fn().mockImplementation((text: string) => ({
+      clean: text,
+      redacted: false,
+      matches: [],
+    }));
+
+    handle = createRpcHandler(makeDeps({
+      embeddingProvider: {
+        modelId: 'test-model',
+        dimensions: 384,
+        embed,
+        embedBatch: vi.fn().mockResolvedValue([new Float32Array(384)]),
+      },
+      verifySignature,
+      scanSecrets,
+    }));
+
+    createMemory(db, {
+      type: 'lesson',
+      title: 'JWT auth notes',
+      content: 'Implement user authentication with JWT and refresh tokens',
+      tags: ['auth'],
+      signature: 'memory-signature',
+    });
+
+    const res = await handle(rpc('noesis.orchestrate', {
+      request: 'Implement user authentication with JWT',
+      token_budget: 4000,
+    }));
+
+    expect(res.error).toBeUndefined();
+    expect(embed).toHaveBeenCalledWith('Implement user authentication with JWT');
+    expect(verifySignature).toHaveBeenCalled();
+    expect(
+      scanSecrets.mock.calls.some(([text]) =>
+        text === 'Implement user authentication with JWT and refresh tokens',
+      ),
+    ).toBe(true);
   });
 });
 

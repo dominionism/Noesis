@@ -45,6 +45,12 @@ export const COLD_STORAGE_DIR: string = join(NOESIS_HOME, 'cold');
 /** Directory for database backups. */
 export const BACKUPS_DIR: string = join(NOESIS_HOME, 'backups');
 
+/** Directory for adapter write-back inbox files. */
+export const INBOX_DIR: string = join(NOESIS_HOME, 'inbox');
+
+/** Directory for archived processed inbox files. */
+export const PROCESSED_INBOX_DIR: string = join(INBOX_DIR, 'processed');
+
 /** Directory for local ONNX embedding models. */
 export const MODELS_DIR: string = join(NOESIS_HOME, 'models');
 

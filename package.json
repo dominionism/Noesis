@@ -8,11 +8,21 @@
   "bin": {
     "noesis": "dist/cli/index.js"
   },
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
+    "check:runtime": "node ./scripts/check-runtime.mjs",
+    "preinstall": "node ./scripts/check-runtime.mjs",
+    "prebuild": "node ./scripts/check-runtime.mjs",
     "build": "tsc",
+    "predev": "node ./scripts/check-runtime.mjs",
     "dev": "tsc --watch",
+    "pretest": "node ./scripts/check-runtime.mjs",
     "test": "vitest run",
+    "pretest:watch": "node ./scripts/check-runtime.mjs",
     "test:watch": "vitest",
+    "prelint": "node ./scripts/check-runtime.mjs",
     "lint": "tsc --noEmit"
   },
   "keywords": [

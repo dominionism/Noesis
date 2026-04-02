@@ -12,8 +12,9 @@
  */
 
 import type { DatabaseConnection } from '../../core/database.js';
-import type { SessionState } from '../../types.js';
-import type { SignFn } from '../types.js';
+import type { SessionState, EmbeddingProvider } from '../../types.js';
+import type { MemorySignFn, SignFn } from '../types.js';
+import { createMemory } from '../../core/memory-crud.js';
 import { generateId } from '../../core/ulid.js';
 
 // ---------------------------------------------------------------------------
@@ -181,7 +182,7 @@ export function endSession(
  * stored as a memory of type 'checkpoint'. This enables resumption across
  * context windows or agent switches.
  */
-export function createSessionCheckpoint(
+export async function createSessionCheckpoint(
   db: DatabaseConnection,
   projectId: string,
   checkpointData: {
@@ -192,10 +193,10 @@ export function createSessionCheckpoint(
     relevant_files: string[];
     working_state: string;
   },
-  sign: SignFn,
-): string {
+  signMemory: MemorySignFn,
+  embeddingProvider?: EmbeddingProvider,
+): Promise<string> {
   const session = getSession(db, projectId);
-  const now = new Date().toISOString();
 
   const checkpoint = {
     ...checkpointData,
@@ -206,23 +207,35 @@ export function createSessionCheckpoint(
 
   const content = JSON.stringify(checkpoint);
   const id = generateId();
-  const signature = sign(content);
+  const title = `Checkpoint: ${checkpointData.task_description}`;
+  const signature = signMemory({
+    id,
+    type: 'checkpoint',
+    title,
+    content,
+    project_id: projectId,
+  });
 
-  db.prepare<[
-    string, string, string,
-    string, string, string, string, string,
-  ]>(`
-    INSERT INTO memories (
-      id, type, title, content,
-      project_id, signature, created_at, updated_at, last_accessed_at
-    ) VALUES (
-      ?, 'checkpoint', ?, ?,
-      ?, ?, ?, ?, ?
-    )
-  `).run(
-    id, `Checkpoint: ${checkpointData.task_description}`, content,
-    projectId, signature, now, now, now,
-  );
+  // Compute embedding so checkpoint memories are discoverable via semantic search
+  let embedding: Buffer | null = null;
+  let embeddingModel: string | null = null;
+  if (embeddingProvider) {
+    try {
+      const vector = await embeddingProvider.embed(title + ' ' + content);
+      embedding = Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength);
+      embeddingModel = embeddingProvider.modelId;
+    } catch { /* non-fatal — store without embedding */ }
+  }
+
+  createMemory(db, {
+    type: 'checkpoint',
+    title,
+    content,
+    project_id: projectId,
+    signature,
+    embedding,
+    embedding_model: embeddingModel,
+  }, id);
 
   return id;
 }

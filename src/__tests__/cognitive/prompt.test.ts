@@ -30,6 +30,7 @@ import { seedBuiltInExperts } from '../../cognitive/experts/built-in-experts.js'
 import { seedBuiltInCapsules } from '../../cognitive/capsules/built-in-capsules.js';
 import { seedBuiltInSkills } from '../../cognitive/skills/built-in-skills.js';
 import { seedBuiltInContexts } from '../../cognitive/context/built-in-contexts.js';
+import { upsertContext } from '../../cognitive/context/context-store.js';
 import type { PromptAssembly } from '../../cognitive/types.js';
 import type { PromptShape, Memory } from '../../types.js';
 
@@ -420,6 +421,17 @@ describe('Prompt Orchestration Engine', () => {
     it('orchestrates full prompt assembly', () => {
       const { db } = setup();
       seedAll(db);
+      upsertContext(db, {
+        context_type: 'state',
+        content: `## Project Status
+Auth work active
+
+## Current Phase
+Implementation
+
+## Working Set
+- src/auth.ts`,
+      }, sign);
 
       const shape = makePromptShape({
         goal: 'Implement a new authentication system with security hardening',
@@ -435,6 +447,7 @@ describe('Prompt Orchestration Engine', () => {
       expect(assembly.prompt_shape.goal).toContain('authentication');
       expect(assembly.rules.length).toBeGreaterThanOrEqual(0);
       expect(assembly.contexts.length).toBeGreaterThan(0);
+      expect(assembly.contexts.some(ctx => ctx.context_type === 'state')).toBe(true);
       expect(assembly.priority_order.length).toBeGreaterThan(0);
     });
 

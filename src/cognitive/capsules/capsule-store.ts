@@ -179,7 +179,7 @@ export function updateCapsule(
     updates.name ?? existing.name,
     updates.display_name ?? existing.display_name,
     description,
-    updates.trigger_patterns
+    updates.trigger_patterns !== undefined
       ? JSON.stringify(updates.trigger_patterns)
       : existing.trigger_patterns,
     updates.version ?? existing.version,

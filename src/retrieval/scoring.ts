@@ -13,7 +13,8 @@
  *     * scope_boost(project match)
  */
 
-import type { MemoryOutcome, MemoryScope } from '../types.js';
+import type { MemoryOutcome, MemoryScope, MemoryType } from '../types.js';
+import { computeRelevanceForType } from '../intelligence/temporal-modeler.js';
 
 /**
  * Compute a decay multiplier based on how recently a memory was accessed.
@@ -116,6 +117,8 @@ export interface CompositeScoreParams {
   memoryProjectId: string | null;
   memoryScope: MemoryScope;
   queryProjectId?: string;
+  /** Memory type for type-aware temporal decay (optional — falls back to recency modifier). */
+  memoryType?: MemoryType;
 }
 
 export interface CompositeScoreResult {
@@ -124,6 +127,8 @@ export interface CompositeScoreResult {
   accessBoost: number;
   successWeight: number;
   scopeBoost: number;
+  /** Type-aware temporal relevance modifier from intelligence/temporal-modeler. */
+  temporalModifier: number;
 }
 
 /**
@@ -142,8 +147,16 @@ export function computeCompositeScore(params: CompositeScoreParams): CompositeSc
     params.queryProjectId,
   );
 
+  // Type-aware temporal decay from intelligence/temporal-modeler
+  let temporalModifier = 1.0;
+  if (params.memoryType) {
+    const accessDate = new Date(params.lastAccessedAt);
+    const ageDays = (Date.now() - accessDate.getTime()) / (1000 * 60 * 60 * 24);
+    temporalModifier = computeRelevanceForType(params.memoryType as never, ageDays);
+  }
+
   const finalScore =
-    params.semanticScore * recencyModifier * accessBoost * successWeight * scopeBoost;
+    params.semanticScore * recencyModifier * accessBoost * successWeight * scopeBoost * temporalModifier;
 
   return {
     finalScore,
@@ -151,11 +164,12 @@ export function computeCompositeScore(params: CompositeScoreParams): CompositeSc
     accessBoost,
     successWeight,
     scopeBoost,
+    temporalModifier,
   };
 }
 
 // ---------------------------------------------------------------------------
-// Freshness Decay & Deduplication (ABILITIES.md)
+// Freshness decay and deduplication
 // ---------------------------------------------------------------------------
 
 /**

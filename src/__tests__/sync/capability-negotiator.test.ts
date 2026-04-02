@@ -20,7 +20,7 @@ describe('getCapabilities', () => {
     expect(cap!.supportsSystemPrompt).toBe(true);
     expect(cap!.supportsManagedSections).toBe(true);
     expect(cap!.canWriteBack).toBe(true);
-    expect(cap!.writeBackMechanism).toBe('file_append');
+    expect(cap!.writeBackMechanism).toBe('cli_command');
   });
 
   it('returns null for unknown adapter', () => {
@@ -39,7 +39,7 @@ describe('getCapabilities', () => {
     const cap = getCapabilities('copilot');
     expect(cap).not.toBeNull();
     expect(cap!.maxContextTokens).toBe(4_000);
-    expect(cap!.supportsSystemPrompt).toBe(false);
+    expect(cap!.supportsSystemPrompt).toBe(true);
   });
 
   it('returns correct capabilities for generic', () => {
@@ -62,7 +62,7 @@ describe('getAllCapabilities', () => {
     expect(ids).toContain('cursor');
     expect(ids).toContain('copilot');
     expect(ids).toContain('aider');
-    expect(ids).toContain('codex');
+    expect(ids).toContain('codex-cli');
     expect(ids).toContain('opencode');
     expect(ids).toContain('antigravity');
     expect(ids).toContain('openclaw');

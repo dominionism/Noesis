@@ -3,7 +3,14 @@
  *
  * Detects per-adapter capabilities and negotiates what features
  * each adapter can support for bidirectional sync.
+ *
+ * `maxContextTokens` reflects the effective Noesis injection budget for the
+ * adapter, not the raw model window advertised by the target tool. That keeps
+ * planning, negotiation, and actual sync execution on the same budget.
  */
+
+import { createDefaultAdapterRegistry } from '../adapters/index.js';
+import { TOKEN_BUDGETS } from '../constants.js';
 
 // ===========================================================================
 // Types
@@ -37,107 +44,22 @@ export interface NegotiationResult {
 // Adapter capability matrix
 // ===========================================================================
 
-const CAPABILITY_MATRIX: Record<string, AdapterCapability> = {
-  'claude-code': {
-    adapterId: 'claude-code',
-    maxContextTokens: 50_000,
-    supportsSystemPrompt: true,
-    supportsFileWrites: true,
-    supportsManagedSections: true,
-    canWriteBack: true,
-    writeBackMechanism: 'file_append',
-    canSubscribeEvents: true,
-    supportsStructuredCorrection: true,
-  },
-  'cursor': {
-    adapterId: 'cursor',
-    maxContextTokens: 8_000,
-    supportsSystemPrompt: true,
-    supportsFileWrites: true,
-    supportsManagedSections: true,
-    canWriteBack: false,
-    writeBackMechanism: 'none',
-    canSubscribeEvents: false,
-    supportsStructuredCorrection: false,
-  },
-  'copilot': {
-    adapterId: 'copilot',
-    maxContextTokens: 4_000,
-    supportsSystemPrompt: false,
-    supportsFileWrites: true,
-    supportsManagedSections: true,
-    canWriteBack: false,
-    writeBackMechanism: 'none',
-    canSubscribeEvents: false,
-    supportsStructuredCorrection: false,
-  },
-  'aider': {
-    adapterId: 'aider',
-    maxContextTokens: 20_000,
-    supportsSystemPrompt: false,
-    supportsFileWrites: true,
-    supportsManagedSections: false,
-    canWriteBack: true,
-    writeBackMechanism: 'file_append',
-    canSubscribeEvents: false,
-    supportsStructuredCorrection: false,
-  },
-  'codex': {
-    adapterId: 'codex',
-    maxContextTokens: 20_000,
-    supportsSystemPrompt: true,
-    supportsFileWrites: true,
-    supportsManagedSections: true,
-    canWriteBack: true,
-    writeBackMechanism: 'cli_command',
-    canSubscribeEvents: false,
-    supportsStructuredCorrection: false,
-  },
-  'opencode': {
-    adapterId: 'opencode',
-    maxContextTokens: 20_000,
-    supportsSystemPrompt: false,
-    supportsFileWrites: true,
-    supportsManagedSections: true,
-    canWriteBack: true,
-    writeBackMechanism: 'file_append',
-    canSubscribeEvents: false,
-    supportsStructuredCorrection: false,
-  },
-  'antigravity': {
-    adapterId: 'antigravity',
-    maxContextTokens: 20_000,
-    supportsSystemPrompt: false,
-    supportsFileWrites: true,
-    supportsManagedSections: true,
-    canWriteBack: true,
-    writeBackMechanism: 'file_append',
-    canSubscribeEvents: false,
-    supportsStructuredCorrection: false,
-  },
-  'openclaw': {
-    adapterId: 'openclaw',
-    maxContextTokens: 20_000,
-    supportsSystemPrompt: false,
-    supportsFileWrites: true,
-    supportsManagedSections: true,
-    canWriteBack: true,
-    writeBackMechanism: 'file_append',
-    canSubscribeEvents: false,
-    supportsStructuredCorrection: false,
-  },
-  'generic': {
-    adapterId: 'generic',
-    maxContextTokens: 10_000,
-    supportsSystemPrompt: false,
-    supportsFileWrites: true,
-    supportsManagedSections: false,
-    canWriteBack: false,
-    writeBackMechanism: 'none',
-    canSubscribeEvents: false,
-    supportsStructuredCorrection: false,
-  },
-};
+const CAPABILITY_MATRIX: Record<string, AdapterCapability> = Object.fromEntries(
+  Array.from(createDefaultAdapterRegistry().adapters.values()).map((adapter) => [
+    adapter.id,
+    {
+      adapterId: adapter.id,
+      maxContextTokens: TOKEN_BUDGETS[adapter.id] ?? adapter.targetCapabilities.maxContextTokens,
+      supportsSystemPrompt: adapter.targetCapabilities.supportsSystemPrompt,
+      supportsFileWrites: adapter.targetCapabilities.supportsFileWrites,
+      supportsManagedSections: adapter.targetCapabilities.supportsManagedSections,
+      canWriteBack: adapter.capabilities.canWriteBack,
+      writeBackMechanism: adapter.capabilities.writeBackMechanism,
+      canSubscribeEvents: adapter.capabilities.canSubscribeEvents,
+      supportsStructuredCorrection: adapter.capabilities.supportsStructuredCorrection,
+    },
+  ]),
+);
 
 // ===========================================================================
 // Public API

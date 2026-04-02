@@ -156,7 +156,13 @@ export function getExpertByName(db: DatabaseConnection, name: string): ExpertDef
 export function updateExpert(
   db: DatabaseConnection,
   id: string,
-  updates: Partial<ExpertDefinitionInput> & { version?: number; enabled?: boolean; task_count?: number; success_rate?: number },
+  updates: Partial<Omit<ExpertDefinitionInput, 'model_preference'>> & {
+    model_preference?: string | null;
+    version?: number;
+    enabled?: boolean;
+    task_count?: number;
+    success_rate?: number;
+  },
   sign: SignFn,
 ): void {
   const existing = db.prepare<[string], ExpertRow>('SELECT * FROM experts WHERE id = ?').get(id);
@@ -186,12 +192,12 @@ export function updateExpert(
     updates.role ?? existing.role,
     updates.domain ?? existing.domain,
     updates.category ?? existing.category,
-    updates.trigger_conditions ? JSON.stringify(updates.trigger_conditions) : existing.trigger_conditions,
-    updates.scope ? JSON.stringify(updates.scope) : existing.scope,
-    updates.deliverables ? JSON.stringify(updates.deliverables) : existing.deliverables,
-    updates.anti_patterns ? JSON.stringify(updates.anti_patterns) : existing.anti_patterns,
-    updates.grading_criteria ? JSON.stringify(updates.grading_criteria) : existing.grading_criteria,
-    updates.tools ? JSON.stringify(updates.tools) : existing.tools,
+    updates.trigger_conditions !== undefined ? JSON.stringify(updates.trigger_conditions) : existing.trigger_conditions,
+    updates.scope !== undefined ? JSON.stringify(updates.scope) : existing.scope,
+    updates.deliverables !== undefined ? JSON.stringify(updates.deliverables) : existing.deliverables,
+    updates.anti_patterns !== undefined ? JSON.stringify(updates.anti_patterns) : existing.anti_patterns,
+    updates.grading_criteria !== undefined ? JSON.stringify(updates.grading_criteria) : existing.grading_criteria,
+    updates.tools !== undefined ? JSON.stringify(updates.tools) : existing.tools,
     updates.model_preference !== undefined ? (updates.model_preference ?? null) : existing.model_preference,
     updates.version ?? existing.version,
     updates.enabled !== undefined ? (updates.enabled ? 1 : 0) : existing.enabled,

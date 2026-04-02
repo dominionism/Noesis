@@ -2,15 +2,32 @@
  * Tests for Sync Orchestrator
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   createSyncPlan,
   canSync,
   executeSyncForTarget,
   aggregateResults,
   runSync,
+  runRuntimeSync,
   type SyncTarget,
 } from '../../sync/sync-orchestrator.js';
+import { DatabaseConnection } from '../../core/database.js';
+import { createProject, listMemories } from '../../core/memory-crud.js';
+import { generateId } from '../../core/ulid.js';
 
 function makeTarget(overrides?: Partial<SyncTarget>): SyncTarget {
   return {
@@ -22,6 +39,60 @@ function makeTarget(overrides?: Partial<SyncTarget>): SyncTarget {
     supportsManagedSections: true,
     canWriteBack: true,
     ...overrides,
+  };
+}
+
+let tempDir: string;
+let projectRoot: string;
+let inboxDir: string;
+let processedInboxDir: string;
+let db: DatabaseConnection;
+
+beforeEach(() => {
+  tempDir = mkdtempSync(join(tmpdir(), 'noesis-sync-test-'));
+  projectRoot = join(tempDir, 'project');
+  inboxDir = join(tempDir, 'inbox');
+  processedInboxDir = join(inboxDir, 'processed');
+
+  mkdirSync(projectRoot, { recursive: true });
+  mkdirSync(inboxDir, { recursive: true });
+
+  db = DatabaseConnection.create(join(tempDir, 'test.db'));
+});
+
+afterEach(() => {
+  db.close();
+  DatabaseConnection.resetInstance();
+  rmSync(tempDir, { recursive: true, force: true });
+});
+
+function makeRuntimeDeps() {
+  return {
+    db,
+    embeddingProvider: {
+      modelId: 'test-model',
+      dimensions: 384,
+      embed: vi.fn().mockResolvedValue(new Float32Array(384)),
+      embedBatch: vi.fn().mockResolvedValue([new Float32Array(384)]),
+    },
+    verifySignature: vi.fn().mockReturnValue({ valid: true, tampered: false }),
+    scanSecrets: vi.fn().mockImplementation((text: string) => ({
+      clean: text,
+      redacted: false,
+      matches: [],
+    })),
+    signMemory: vi.fn().mockReturnValue('test-signature'),
+    scanAndRedact: vi.fn().mockImplementation((text: string) => ({
+      clean: text,
+      redacted: false,
+      matches: [],
+    })),
+    checkDangerousPatterns: vi.fn().mockReturnValue([]),
+    writeAuditLog: vi.fn(),
+    emitEvent: vi.fn(),
+    generateId,
+    inboxDir,
+    processedInboxDir,
   };
 }
 
@@ -130,5 +201,98 @@ describe('runSync', () => {
     const result = runSync([], 5000, { force: true });
     expect(result.outcomes).toHaveLength(0);
     expect(result.totalTokensInjected).toBe(0);
+  });
+});
+
+describe('runRuntimeSync', () => {
+  it('writes adapter files with managed sections while preserving user content', async () => {
+    mkdirSync(join(projectRoot, '.claude'), { recursive: true });
+    mkdirSync(join(projectRoot, '.git'), { recursive: true });
+    writeFileSync(join(projectRoot, 'CLAUDE.md'), '# Existing Instructions\n\nKeep this content.\n');
+
+    const first = await runRuntimeSync(makeRuntimeDeps(), {
+      projectRoot,
+      adapterFilter: ['claude-code'],
+      force: true,
+    });
+    const second = await runRuntimeSync(makeRuntimeDeps(), {
+      projectRoot,
+      adapterFilter: ['claude-code'],
+      force: true,
+    });
+
+    const claudePath = join(projectRoot, 'CLAUDE.md');
+    const canonicalPath = join(projectRoot, 'Context', 'CLAUDE.md');
+    const content = readFileSync(canonicalPath, 'utf-8');
+    const gitignoreContent = readFileSync(join(projectRoot, '.gitignore'), 'utf-8');
+
+    expect(first.status).toBe('completed');
+    expect(first.totalFilesWritten).toBe(3);
+    expect(second.totalFilesWritten).toBe(1);
+    expect(existsSync(canonicalPath)).toBe(true);
+    expect(existsSync(claudePath)).toBe(true);
+    expect(lstatSync(claudePath).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(claudePath)).toBe('Context/CLAUDE.md');
+    expect(content).toContain('# Existing Instructions');
+    expect(content).toContain('Keep this content.');
+    expect(content).toContain('<!-- NOESIS:BEGIN adapter=claude-code');
+    expect(content.match(/NOESIS:BEGIN adapter=claude-code/g)).toHaveLength(1);
+    expect(gitignoreContent).toContain('/CLAUDE.md');
+    expect(gitignoreContent).toContain('/Context/CLAUDE.md');
+  });
+
+  it('ingests inbox learnings into persisted memories and archives the source file', async () => {
+    mkdirSync(join(projectRoot, '.claude'), { recursive: true });
+    const project = createProject(db, { name: 'sync-project', path: projectRoot });
+
+    const adapterInboxDir = join(inboxDir, 'claude-code');
+    const sourceFile = join(adapterInboxDir, 'feedback.md');
+    mkdirSync(adapterInboxDir, { recursive: true });
+    writeFileSync(
+      sourceFile,
+      'LESSON: Validate inputs before writes\n\nPREFERENCE: Prefer explicit assertions',
+    );
+
+    const result = await runRuntimeSync(makeRuntimeDeps(), {
+      projectRoot,
+      adapterFilter: ['claude-code'],
+      force: true,
+    });
+
+    const stored = listMemories(db, { project_id: project.id, limit: 10 })
+      .filter((memory) => memory.source === 'adapter:claude-code');
+
+    expect(result.status).toBe('completed');
+    expect(result.writeback.entriesFound).toBe(1);
+    expect(result.writeback.entriesProcessed).toBe(1);
+    expect(result.writeback.memoriesCreated).toBe(2);
+    expect(stored.map((memory) => memory.type).sort()).toEqual(['lesson', 'preference']);
+    expect(existsSync(sourceFile)).toBe(false);
+    expect(readdirSync(processedInboxDir)).toHaveLength(1);
+  });
+
+  it('does not write files, persist memories, or archive inbox entries during dry run', async () => {
+    mkdirSync(join(projectRoot, '.claude'), { recursive: true });
+
+    const adapterInboxDir = join(inboxDir, 'claude-code');
+    const sourceFile = join(adapterInboxDir, 'feedback.md');
+    mkdirSync(adapterInboxDir, { recursive: true });
+    writeFileSync(sourceFile, 'LESSON: Dry runs should not mutate state');
+
+    const result = await runRuntimeSync(makeRuntimeDeps(), {
+      projectRoot,
+      adapterFilter: ['claude-code'],
+      dryRun: true,
+      force: true,
+    });
+
+    expect(result.status).toBe('dry_run');
+    expect(result.totalFilesWritten).toBe(0);
+    expect(result.writeback.memoriesCreated).toBe(1);
+    expect(existsSync(join(projectRoot, 'CLAUDE.md'))).toBe(false);
+    expect(existsSync(join(projectRoot, 'Context', 'CLAUDE.md'))).toBe(false);
+    expect(existsSync(sourceFile)).toBe(true);
+    expect(existsSync(processedInboxDir)).toBe(false);
+    expect(listMemories(db, { limit: 10 })).toHaveLength(0);
   });
 });

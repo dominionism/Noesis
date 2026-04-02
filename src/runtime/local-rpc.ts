@@ -7,6 +7,7 @@ import { DatabaseConnection } from '../core/database.js';
 import { getMemory } from '../core/memory-crud.js';
 import { generateId } from '../core/ulid.js';
 import { createRpcHandler, type RpcDependencies, type JsonRpcResponse } from '../daemon/rpc.js';
+import { countUnresolvedConflicts } from '../retrieval/conflict-count.js';
 import { writeAuditLog } from '../security/audit.js';
 import { checkDangerousPatterns } from '../security/dangerous-patterns.js';
 import { scanAndRedact, scanForSecrets, redactSecrets } from '../security/secret-scanner.js';
@@ -53,11 +54,11 @@ let signingDepsPromise:
 const READ_METHODS = new Set<string>([
   'noesis.ping',
   'noesis.recall',
+  'noesis.getMemory',
   'noesis.retrievalGap',
   'noesis.checkAction',
   'noesis.explain',
   'noesis.sessionList',
-  'noesis.sync',
   'noesis.orchestrate',
   'noesis.checkCompliance',
   'noesis.routeExpertCognitive',
@@ -66,9 +67,11 @@ const READ_METHODS = new Set<string>([
   'noesis.getContexts',
   'noesis.checkReadinessEvidence',
   'noesis.checkQualityGate',
+  'noesis.getEffectivenessMetrics',
   'noesis.predictFailures',
   'noesis.getGsdState',
   'noesis.resumeHandoff',
+  'noesis.listHandoffs',
   'noesis.checkDecisionFidelity',
   'noesis.listRules',
   'noesis.listExperts',
@@ -90,6 +93,7 @@ const WRITE_METHODS = new Set<string>([
   'noesis.executeGsdPhase',
   'noesis.startSessionCognitive',
   'noesis.createHandoff',
+  'noesis.sync',
 ]);
 
 const UNSUPPORTED_LOCAL_METHODS = new Set<string>([
@@ -107,6 +111,7 @@ const COGNITIVE_METHODS = new Set<string>([
   'noesis.updateContext',
   'noesis.checkReadinessEvidence',
   'noesis.checkQualityGate',
+  'noesis.getEffectivenessMetrics',
   'noesis.predictFailures',
   'noesis.processLearning',
   'noesis.createGsdProject',
@@ -115,6 +120,7 @@ const COGNITIVE_METHODS = new Set<string>([
   'noesis.startSessionCognitive',
   'noesis.createHandoff',
   'noesis.resumeHandoff',
+  'noesis.listHandoffs',
   'noesis.checkDecisionFidelity',
   'noesis.listRules',
   'noesis.listExperts',
@@ -244,28 +250,6 @@ function createScanSecrets(text: string): { clean: string; redacted: boolean; ma
     return { clean: text, redacted: false, matches: [] };
   }
   return { clean: redactSecrets(text, matches), redacted: true, matches };
-}
-
-function countUnresolvedConflicts(db: DatabaseConnection, projectId?: string): number {
-  if (projectId) {
-    const row = db.prepare<[string, string], { count: number }>(`
-      SELECT COUNT(*) AS count
-      FROM memory_conflicts mc
-      JOIN memories a ON a.id = mc.memory_a_id
-      JOIN memories b ON b.id = mc.memory_b_id
-      WHERE mc.resolution IS NULL
-        AND (a.project_id = ? OR b.project_id = ?)
-    `).get(projectId, projectId);
-    return row?.count ?? 0;
-  }
-
-  const row = db.prepare<[], { count: number }>(`
-    SELECT COUNT(*) AS count
-    FROM memory_conflicts
-    WHERE resolution IS NULL
-  `).get();
-
-  return row?.count ?? 0;
 }
 
 async function initializeCognitiveModules(db: DatabaseConnection, sign: (content: string) => string): Promise<void> {

@@ -111,19 +111,16 @@ registerCapsule({
 });
 ```
 
-### Option 2: File-Based Capsule (Future)
+### Option 2: File-Based Capsule (Current Markdown Format)
 
-Place capsule files in `~/.agents/capsules/<capsule-id>/`:
+Place a single `CAPSULE.md` file in `~/.agents/capsules/<capsule-id>/`:
 
 ```
 ~/.agents/capsules/data-pipeline/
-├── intent.md           # When to use this capsule
-├── assembly.md         # What context to load
-├── examples/           # Reference examples
-├── anti-patterns.md    # Domain-specific anti-patterns
-├── critic-rules.md     # Custom critique dimensions
-└── memory-policy.md    # Advisory memory recall preferences
+└── CAPSULE.md          # Frontmatter + markdown sections
 ```
+
+`registerMarkdownAssets()` parses sections such as `## Intent`, `## Assembly`, `## Anti-patterns`, and `## Quality Criteria` from `CAPSULE.md` and upserts them into the live capsule store.
 
 ## How Capsule Matching Works
 

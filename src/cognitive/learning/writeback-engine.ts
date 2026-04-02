@@ -123,11 +123,12 @@ export function writebackToContexts(
 ): void {
   // Append to failure_patterns context
   const failureEntry = [
-    `### ${failureClass}: ${lesson.trigger}`,
-    `- **Miss:** ${lesson.miss}`,
-    `- **Root Cause:** ${lesson.rootCause}`,
-    `- **Prevention:** ${lesson.prevention}`,
-    `- **Date:** ${new Date().toISOString().split('T')[0]}`,
+    `## ${failureClass}: ${lesson.trigger}`,
+    `- Trigger: ${lesson.trigger}`,
+    `- Miss: ${lesson.miss}`,
+    `- Root Cause: ${lesson.rootCause}`,
+    `- Prevention: ${lesson.prevention}`,
+    `- Date: ${new Date().toISOString().split('T')[0]}`,
   ].join('\n');
 
   appendToContext(db, 'failure_patterns', projectId, failureEntry, sign);

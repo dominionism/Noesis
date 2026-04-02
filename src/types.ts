@@ -688,6 +688,8 @@ export interface FileWriteRequest {
   managedSection: boolean;
   adapterId: string;
   hash: string;
+  rawContent?: string;
+  version?: string;
 }
 
 export interface ExtractedLearnings {

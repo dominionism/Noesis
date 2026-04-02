@@ -2,10 +2,11 @@
  * Hot Memory Management
  *
  * Loads markdown files from the ~/.agents/ directory tree into memory
- * for injection into agent context windows. Hot memory files are the
- * highest-priority, always-included layer of the memory hierarchy:
+ * for injection into agent context windows.
  *
- *   Hot (this module) -> Warm (SQLite retrieval) -> Cold (JSONL transcripts)
+ * These helpers support explicit file-backed context workflows. The default
+ * runtime write pipeline persists live memories to SQLite and does not mirror
+ * writes into hot markdown automatically.
  *
  * Uses mtime-based caching to avoid unnecessary I/O while detecting edits.
  * Synchronous I/O is intentional — files are small and local.

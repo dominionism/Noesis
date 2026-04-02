@@ -17,7 +17,7 @@ export function registerCritiqueCommand(program: Command): void {
     .option('--project <id>', 'Project ID')
     .option('--type <type>', 'Critique type: research or plan', 'plan')
     .option('--cycles <n>', 'Maximum critic cycles', parseInt)
-    .action(async (description: string, options: { project?: string; type?: string }) => {
+    .action(async (description: string, options: { project?: string; type?: string; cycles?: number }) => {
       const globalOpts = program.opts();
       const client = createClient();
 
@@ -34,7 +34,10 @@ export function registerCritiqueCommand(program: Command): void {
 
         const result = await client.call<Record<string, unknown>>(
           method,
-          { work: description },
+          {
+            work: description,
+            max_iterations: Math.max(1, options.cycles ?? 1),
+          },
         );
 
         if (globalOpts.json) {

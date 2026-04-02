@@ -129,14 +129,14 @@ describe('Cross-Adapter: Format transformation roundtrips', () => {
 describe('Cross-Adapter: Correct format mapping per adapter', () => {
   const expectedFormats: Record<string, string> = {
     'claude-code': 'markdown',
-    'cursor': 'frontmatter',
+    'cursor': 'markdown',
     'copilot': 'markdown',
-    'aider': 'frontmatter',
-    'codex': 'markdown',
+    'aider': 'markdown',
+    'codex-cli': 'markdown',
     'opencode': 'markdown',
-    'antigravity': 'toml',
+    'antigravity': 'markdown',
     'openclaw': 'markdown',
-    'generic': 'json',
+    'generic': 'markdown',
   };
 
   for (const [adapter, format] of Object.entries(expectedFormats)) {
@@ -152,13 +152,13 @@ describe('Cross-Adapter: Correct format mapping per adapter', () => {
     const claude = transformForAdapter('claude-code', sections);
     expect(claude.format).toBe('markdown');
 
-    // Antigravity = TOML
+    // Antigravity = markdown
     const antigravity = transformForAdapter('antigravity', sections);
-    expect(antigravity.format).toBe('toml');
+    expect(antigravity.format).toBe('markdown');
 
-    // Generic = JSON
+    // Generic = markdown
     const generic = transformForAdapter('generic', sections);
-    expect(generic.format).toBe('json');
+    expect(generic.format).toBe('markdown');
   });
 });
 
@@ -223,7 +223,7 @@ describe('Cross-Adapter: Capability negotiation parity', () => {
     // Several adapters support write-back
     expect(supportsFeature('claude-code', 'writeBack')).toBe(true);
     expect(supportsFeature('aider', 'writeBack')).toBe(true);
-    expect(supportsFeature('codex', 'writeBack')).toBe(true);
+    expect(supportsFeature('codex-cli', 'writeBack')).toBe(true);
     expect(supportsFeature('cursor', 'writeBack')).toBe(false);
   });
 });

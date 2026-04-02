@@ -151,20 +151,11 @@ export function registerSessionCommand(program: Command): void {
         await client.ensureDaemon();
         await client.connect();
 
-        // Retrieve the session memory by querying for the session ID
-        const recallResult = await client.call<{
-          memories: Array<Record<string, unknown>>;
-        }>('noesis.recall', { query: sessionId });
-
-        if (!recallResult.memories || recallResult.memories.length === 0) {
+        const sessionMemory = await client.getMemory(sessionId, { type: 'session' });
+        if (!sessionMemory) {
           console.error(`No session memory found for: ${sessionId}`);
           process.exit(1);
         }
-
-        // Find the session-type memory or use the first match
-        const sessionMemory =
-          recallResult.memories.find(m => m.type === 'session') ??
-          recallResult.memories[0];
 
         // Parse session content to recover state
         let sessionContent: Record<string, unknown> = {};

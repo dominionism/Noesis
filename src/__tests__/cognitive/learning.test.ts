@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { DatabaseConnection } from '../../core/database.js';
+import { getFailurePatterns } from '../../cognitive/context/context-engine.js';
 
 // Correction detector
 import {
@@ -389,6 +390,16 @@ describe('Active Learning Loop', () => {
         "SELECT content FROM context_state WHERE context_type = 'failure_patterns'",
       ).get();
       expect(fp).toBeDefined();
+      expect(fp!.content).toContain('## verification: Test suite did not cover edge case');
+      expect(fp!.content).toContain('- Trigger: Test suite did not cover edge case');
+      expect(fp!.content).toContain('- Root Cause: No boundary tests for leap years');
+      expect(fp!.content).not.toContain('**Miss:**');
+
+      const patterns = getFailurePatterns(db);
+      expect(patterns).toHaveLength(1);
+      expect(patterns[0].trigger).toBe('Test suite did not cover edge case');
+      expect(patterns[0].miss).toBe('Edge case in date parsing');
+      expect(patterns[0].prevention).toBe('Add boundary tests for all date operations');
 
       // Check lessons_learned context was created
       const ll = db.prepare<[], { content: string }>(

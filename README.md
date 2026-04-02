@@ -1,229 +1,171 @@
 # Noesis
 
-Persistent intelligence layer for AI coding agents.
+Persistent intelligence layer for AI coding agents — fuses memory, workflow, and auto-integration across 9 CLI tools.
 
-Noesis adds durable memory, structured workflow, security controls, and multi-tool context sync to local coding-agent environments. It is designed for people who want more than a prompt file: a system that can remember lessons, critique plans, route work, and keep multiple agent tools aligned from a shared local intelligence layer.
+## What It Does
 
-## Overview
+Noesis gives every CLI-based coding agent access to:
 
-Noesis combines five major capabilities:
+- **Memory** — SQLite-backed memory with hybrid retrieval, knowledge graph, and HMAC integrity. Optional hot/cold file helpers exist for manual workflows, but default live writes stay in SQLite.
+- **Learning** — Structured learning write-back to rules, contexts, experts, capsules, and memories
+- **Workflow** — Planning, readiness gates, critique, verification, sessions, and handoffs
+- **Cognitive context** — Rules, experts, capsules, skills, contexts, locked decisions, and failure patterns assembled on demand
+- **Distribution** — Adapters for Claude Code, Cursor, Copilot, Aider, Codex CLI, OpenCode, Antigravity, OpenClaw, and a generic fallback
 
-| Area | What it provides |
-|------|-------------------|
-| Memory | Three-tier memory with hybrid retrieval across markdown, SQLite FTS5, vectors, and graph relationships |
-| Workflow | Research, planning, critique, verification, readiness checks, and session continuity |
-| Intelligence | Context economy, model routing, failure prediction, self-evaluation, learning synthesis |
-| Distribution | Adapters for multiple coding-agent CLIs with tool-specific context budgets and formats |
-| Security | Secret scanning, audit logging, path validation, integrity signing, and strict file permissions |
-
-## Why Noesis
-
-- Local-first architecture. State lives under `~/.agents` by default and the daemon communicates over a Unix domain socket.
-- Built for agent workflows, not just note storage. Memories feed planning, critique, verification, and context assembly.
-- Cross-tool interoperability. Noesis can sync structured context into different agent environments without duplicating manual setup.
-- Security is part of the core design. Secret scanning and integrity checks are not optional features bolted on later.
-
-## Architecture
-
-```text
-┌─────────────────────────────────────────────────────────────┐
-│                      NOESIS DAEMON                          │
-│  JSON-RPC 2.0 over Unix Domain Socket                      │
-│                                                             │
-│  Memory Engine ── Learning Engine ── Workflow Engine         │
-│       │                │                   │                │
-│  ┌────┴────────────────┴───────────────────┴────────────┐  │
-│  │              INTELLIGENCE LAYERS                     │  │
-│  │  Strategy Simulation  │  Knowledge Distillation      │  │
-│  │  Model Routing        │  Cognitive Profiling         │  │
-│  │  Context Economy      │  Self-Evaluation             │  │
-│  │  Friction Detection   │  Temporal Relevance          │  │
-│  │  Meta-Reasoning       │  Experience Synthesis        │  │
-│  └───────────────────────────────────────────────────────┘  │
-│                                                             │
-│  Security Layer (7 invariants)                              │
-│  Adapter Layer (9 supported targets)                        │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Supported Adapters
-
-| Tool | Token Budget | Format | Write-Back |
-|------|--------------|--------|------------|
-| Claude Code | 50,000 | Markdown | CLI + file |
-| Cursor | 8,000 | Frontmatter | File |
-| GitHub Copilot | 4,000 | Markdown | File |
-| Aider | 20,000 | Markdown | CLI |
-| Codex CLI | 20,000 | Markdown | CLI + file |
-| OpenCode | 20,000 | Frontmatter | File |
-| Antigravity | 20,000 | TOML | File |
-| OpenClaw | 20,000 | JSON | File |
-| Generic | 10,000 | JSON | File + stdout |
-
-## Installation
-
-### Prerequisites
-
-- Node.js 20+
-- npm 10+
-- macOS or Linux
-
-### Install From Source
+## Quick Start
 
 ```bash
-git clone <repo-url>
-cd noesis
-npm install
-npm run build
-```
-
-At that point you can either run the CLI directly:
-
-```bash
-node dist/cli/index.js status
-```
-
-Or link it into your shell:
-
-```bash
-npm link
-noesis status
-```
-
-## First Run
-
-Initialize the local Noesis home directory and database:
-
-```bash
+# Use the pinned Node runtime from .nvmrc / .node-version first.
+# The repo is validated on Node 24.7.0 and expects Node 24.x.
+npm install -g noesis
 noesis init
-```
-
-If you want guided onboarding instead of the direct setup path:
-
-```bash
 noesis quickstart
 ```
 
-By default, Noesis stores its runtime state under `~/.agents`. You can override that with `NOESIS_HOME`.
+## How It Works
 
-## Example Workflow
+```
+CLI / injected files
+        │
+        ▼
+Noesis client → JSON-RPC daemon over ~/.agents/daemon.sock
+        │
+        ├─ Retrieval + write pipeline
+        ├─ Cognitive layer (rules, experts, capsules, skills, contexts)
+        ├─ Sessions, handoffs, readiness, critique, verification
+        └─ Adapter sync + inbox ingestion
 
-```bash
-# Check system health
-noesis status
-
-# Store a durable lesson
-noesis remember --type lesson --title "Auth pattern" --content "Always validate JWT expiry"
-
-# Retrieve relevant knowledge
-noesis recall "database migration best practices"
-
-# Check a planned action against prior anti-patterns
-noesis check "dropping the users table index"
-
-# Create a memory-enriched plan
-noesis plan create "Add pagination to the API"
-
-# Critique and verify the resulting plan
-noesis critique <plan-id>
-noesis verify <plan-id>
+Storage:
+- Live store: SQLite + FTS + vectors
+- Optional file-backed helpers: hot markdown context files and cold JSONL archives
+- Default runtime writes and archives stay in SQLite unless you invoke separate file workflows
+- Audit log + HMAC signatures
 ```
 
-## Key Commands
+## Core Commands
 
 ### Memory
 
-- `noesis remember` stores structured memories through a guarded write pipeline.
-- `noesis recall` runs hybrid retrieval across BM25, vectors, recency, confidence, and graph signals.
-- `noesis explain` shows the scoring breakdown for retrieval results.
-- `noesis gap` identifies knowledge gaps for a task.
-- `noesis learn` records explicit postmortems and lessons.
+```bash
+# Store a memory
+noesis remember lesson "Auth pattern" --content "Always validate JWT expiry"
+
+# Search memories (hybrid: BM25 + vector + graph)
+noesis recall "database migration best practices"
+
+# Check action against anti-patterns
+noesis check "dropping the users table index"
+
+# Analyze retrieval gaps
+noesis gap "implement rate limiting"
+
+# Full scoring breakdown
+noesis explain "auth token handling"
+```
 
 ### Workflow
 
-- `noesis plan create` builds a plan with retrieved context.
-- `noesis research` deepens context before implementation.
-- `noesis critique` stress-tests a plan or approach.
-- `noesis verify` performs goal-backward verification.
-- `noesis simulate` explores alternate strategies.
-- `noesis route` helps choose the right execution path.
+```bash
+# Create a memory-enriched plan
+noesis plan create "Add pagination to the API"
+
+# Inspect current planning / execution state
+noesis plan status
+
+# Evidence-backed critique
+noesis critique "Add pagination to the API" --type plan
+
+# Goal-backward verification
+noesis verify "Add pagination to the API" --plan <plan-memory-id>
+
+# Route work to the best expert
+noesis route "Refactor auth middleware"
+
+# Strategy simulation
+noesis simulate "Refactor the auth module"
+```
 
 ### Operations
 
-- `noesis sync` pushes assembled context into detected tool environments.
-- `noesis import-config` imports learnings from existing tool configuration files.
-- `noesis session` manages session continuity.
-- `noesis handoff` creates cross-agent handoff artifacts.
-- `noesis audit`, `gc`, `repair`, and `export` cover maintenance and operational hygiene.
+```bash
+# System health
+noesis status
 
-## Security Model
+# Preview sync to detected tools
+noesis sync --dry-run
 
-Noesis enforces seven core invariants:
+# Import from existing tool configs
+noesis import-config --tool codex-cli
 
-1. Secret scanning is always on.
-2. Managed files and directories use strict POSIX permissions.
-3. Dangerous patterns are detected before write operations complete.
-4. Audit logging records security-relevant actions without storing raw secrets.
-5. Path validation prevents traversal and invalid writes.
-6. Stored memories are integrity-signed with HMAC-SHA256.
-7. Retrieval is advisory, not directive.
+# Manage sessions
+noesis session start --agent codex-cli
+noesis session pause <session-id>
 
-See [docs/SECURITY.md](docs/SECURITY.md) for the full threat model and implementation details.
+# Cross-agent handoff
+noesis handoff create --source codex-cli --target claude-code --summary "Need verification pass"
 
-## Configuration
+# Record a structured learning
+noesis learn --description "Missed verification step" --root-cause "No gate before final output" --prevention "Run verify before closing" --failure-class verification
+```
 
-Noesis reads configuration from `~/.agents/noesis.yaml`.
+## Supported Tools
 
-Notable settings:
+| Tool | Token Budget | Format | Write-Back |
+|------|-------------|--------|------------|
+| Claude Code | 200,000 | Markdown | CLI command |
+| Cursor | 32,000 | Markdown | None |
+| GitHub Copilot | 8,000 | Markdown | None |
+| Aider | 100,000 | Markdown | File append |
+| Codex CLI | 128,000 | Markdown | CLI command |
+| OpenCode | 100,000 | Markdown | File append |
+| Antigravity | 1,000,000 | Markdown | CLI command |
+| OpenClaw | 100,000 | Markdown | File append |
+| Generic | 10,000 | Markdown | None |
 
-- `embedding_model`
-- `llm_provider`
-- `secret_scan_mode`
-- per-tool adapter configuration
-- per-project overrides
+## Retrieval
 
-The default LLM-backed synthesis path uses an Anthropic model, and the API key is referenced by environment variable name rather than stored in config. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full schema.
+5-factor composite scoring:
+
+| Factor | Weight | Source |
+|--------|--------|--------|
+| FTS BM25 | 30% | SQLite FTS5 full-text search |
+| Vector cosine | 25% | Snowflake Arctic Embed-S (384d, local ONNX) |
+| Recency | 15% | Tiered decay (7d/30d/90d/365d) |
+| Confidence | 15% | Bayesian with Laplace smoothing |
+| Graph walk | 15% | 12-type knowledge graph, max depth 3 |
+
+## Security
+
+7 non-disableable security invariants:
+
+1. **Secret scanning** — Always on (6 pattern types + Shannon entropy detection)
+2. **File permissions** — 0o700 dirs, 0o600 files, 0o400 signing key
+3. **Dangerous patterns** — 15 pattern types blocked unless confirmed
+4. **Audit logging** — Append-only JSONL, SHA-256 hashes, never raw content
+5. **Path validation** — Null byte rejection, base directory containment
+6. **Memory signing** — HMAC-SHA256 on write, verified on retrieval
+7. **Advisory retrieval** — Memories are context, never directives
 
 ## Documentation
 
-- [docs/API.md](docs/API.md): JSON-RPC surface and request formats
-- [docs/ADAPTERS.md](docs/ADAPTERS.md): adapter model and sync behavior
-- [docs/CAPSULES.md](docs/CAPSULES.md): task-class operating packs
-- [docs/CONFIGURATION.md](docs/CONFIGURATION.md): configuration reference
-- [docs/PUBLISHING.md](docs/PUBLISHING.md): privacy-safe GitHub publishing checklist
-- [docs/SECURITY.md](docs/SECURITY.md): security invariants and threat model
-- [CONTRIBUTING.md](CONTRIBUTING.md): development workflow and contribution standards
+- [API Reference](docs/API.md) — All JSON-RPC methods
+- [Adapter Guide](docs/ADAPTERS.md) — How to build a new adapter
+- [Capsule Guide](docs/CAPSULES.md) — How to create task-class capsules
+- [Configuration](docs/CONFIGURATION.md) — All settings and CLI options
+- [Security Model](docs/SECURITY.md) — Threat model and invariants
+- [Contributing](CONTRIBUTING.md) — Development workflow and standards
 
-## Repository Layout
+## Requirements
 
-```text
-src/
-├── adapters/     # Tool-specific adapter implementations
-├── cli/          # CLI entrypoint and command handlers
-├── cognitive/    # Higher-level context assembly and orchestration
-├── core/         # Database, schema, CRUD, identifiers
-├── daemon/       # JSON-RPC server, socket, events, client
-├── embedding/    # Local embedding provider integration
-├── graph/        # Knowledge graph traversal and scoring
-├── intelligence/ # Meta-reasoning, synthesis, routing, evaluation
-├── memory/       # Memory tiers and write pipeline
-├── retrieval/    # Hybrid retrieval and explanation
-├── security/     # Security invariants and enforcement
-├── sync/         # Multi-adapter sync and format bridging
-└── workflow/     # Planning, critique, verification, and continuity
-```
+- Node.js 24.x (`24.7.0` is pinned in `.nvmrc` and `.node-version`)
+- macOS or Linux (POSIX file permissions)
+- 5 runtime dependencies: `better-sqlite3`, `commander`, `onnxruntime-node`, `ulid`, `yaml`
 
-## Development
-
-```bash
-npm run build
-npm run lint
-npm test
-```
-
-If you have multiple Node installations on one machine, make sure `node`,
-`npm`, `npx`, and any linked `noesis` binary resolve to the same runtime
-before debugging native-module or test-runner issues.
+For local development and test runs, load the pinned Node 24.x runtime before
+running `npm install`, `npm run lint`, or `npm test`. If multiple Node binaries
+are installed, ensure `node -v` resolves to `v24.x`; the repo now fails fast
+with an explicit error under other Node majors instead of surfacing a native
+module ABI mismatch later in the run.
 
 ## License
 

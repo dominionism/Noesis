@@ -59,6 +59,8 @@ import { registerRouteCommand } from './commands/route.js';
 import { registerOptimizeCommand } from './commands/optimize.js';
 import { registerSimulateCommand } from './commands/simulate.js';
 import { registerCognitiveCommands } from './commands/cognitive.js';
+import { registerIntelligenceCommands } from './commands/intelligence.js';
+import { registerWorkflowCommands } from './commands/workflow-cmds.js';
 
 const program = new Command();
 
@@ -104,5 +106,7 @@ registerRouteCommand(program);
 registerOptimizeCommand(program);
 registerSimulateCommand(program);
 registerCognitiveCommands(program);
+registerIntelligenceCommands(program);
+registerWorkflowCommands(program);
 
 program.parse();

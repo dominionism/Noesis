@@ -77,8 +77,8 @@ export function createYourToolAdapter(): Adapter {
       const configExists = await query.exists('~/.your-tool/config.json');
       return {
         detected: configExists,
-        version: configExists ? '1.0' : null,
-        configPath: configExists ? '~/.your-tool/config.json' : null,
+        version: configExists ? '1.0' : undefined,
+        configPaths: configExists ? ['~/.your-tool/config.json'] : [],
       };
     },
 
@@ -120,24 +120,26 @@ import { createYourToolAdapter } from './your-tool.js';
 registry.register(createYourToolAdapter());
 ```
 
-### 3. Add Capability Declaration
-
-Add your tool's capabilities to the capability negotiator in `src/sync/capability-negotiator.ts`:
+### 3. Declare Capabilities in the Adapter
 
 ```typescript
-const ADAPTER_CAPABILITIES: Record<string, AdapterCapabilities> = {
-  // ...existing adapters...
-  'your-tool': {
-    maxTokens: 15000,         // Context window budget
-    supportsStreaming: false,
-    supportsManagedSections: true,
-    supportsWriteBack: true,
-    writeBackMechanism: 'file',  // 'file', 'cli', or 'api'
-    formatPreference: 'markdown', // 'markdown', 'json', 'toml', 'frontmatter'
-    features: ['memory_injection', 'learning_extraction'],
-  },
+const capabilities = {
+  canWriteBack: true,
+  writeBackMechanism: 'cli_command', // or 'file_append' | 'none'
+  canSubscribeEvents: false,
+  canReportSessions: true,
+  supportsStructuredCorrection: false,
+};
+
+const targetCapabilities = {
+  maxContextTokens: 15000,
+  supportsSystemPrompt: true,
+  supportsFileWrites: true,
+  supportsManagedSections: true,
 };
 ```
+
+`createDefaultAdapterRegistry()` registers the shipped adapters, and the capability negotiator now derives capability data from the adapter implementations rather than a separate static matrix.
 
 ### 4. Add Format Bridge (if needed)
 
@@ -191,15 +193,15 @@ Each adapter has a token budget that limits how much context is injected. Budget
 
 | Adapter | Budget |
 |---------|--------|
-| claude-code | 50,000 |
-| codex | 20,000 |
-| opencode | 20,000 |
-| antigravity | 20,000 |
-| openclaw | 20,000 |
-| aider | 20,000 |
+| claude-code | 200,000 |
+| codex-cli | 128,000 |
+| opencode | 100,000 |
+| antigravity | 1,000,000 |
+| openclaw | 100,000 |
+| aider | 100,000 |
 | generic | 10,000 |
-| cursor | 8,000 |
-| copilot | 4,000 |
+| cursor | 32,000 |
+| copilot | 8,000 |
 
 ### Context Assembly Priority
 
@@ -222,12 +224,12 @@ Context is assembled in strict priority order. Higher-priority sections get full
 Managed sections are delimited blocks injected into tool config files. They include a hash for tamper detection:
 
 ```markdown
-<!-- BEGIN NOESIS MANAGED SECTION v1.0.0 hash:abc123 adapter:claude-code -->
+<!-- NOESIS:BEGIN adapter=claude-code version=1.0.0 hash=abc123 timestamp=2026-03-24T00:00:00.000Z -->
 ## Available Skills
 - **React hooks** (confidence: 0.92): Custom hook patterns...
 ## Anti-Patterns (Avoid)
 - **Direct DOM manipulation**: Use React refs instead...
-<!-- END NOESIS MANAGED SECTION -->
+<!-- NOESIS:END adapter=claude-code -->
 ```
 
 The hash allows Noesis to detect if the user has manually edited the managed section. If modified, the section is preserved and a warning is emitted rather than overwriting.
@@ -260,14 +262,14 @@ Override this for tool-specific parsing (e.g., Cursor's `.cursorrules` format or
 
 ### Format Bridges
 
-Noesis supports 5 output formats. Each adapter declares its preferred format:
+The bridge library supports 5 output formats, but the default shipped adapter registry currently maps every built-in adapter to markdown because their live transforms emit markdown instruction files:
 
 | Format | Adapters | Description |
 |--------|----------|-------------|
-| `markdown` | claude-code, copilot, codex | Standard markdown with headers |
-| `frontmatter` | cursor, opencode | YAML frontmatter + markdown body |
-| `toml` | antigravity | TOML sections |
-| `json` | generic, openclaw | Structured JSON |
+| `markdown` | claude-code, cursor, copilot, aider, codex-cli, opencode, antigravity, openclaw, generic | Standard markdown with headers |
+| `frontmatter` | library support only | YAML frontmatter + markdown body |
+| `toml` | library support only | TOML sections |
+| `json` | library support only | Structured JSON |
 | `plain` | fallback | Plain text |
 
 Format conversion is handled by `src/sync/format-bridges.ts`. The `transformToFormat` function takes context sections and renders them in the target format.
@@ -276,15 +278,15 @@ Format conversion is handled by `src/sync/format-bridges.ts`. The `transformToFo
 
 | Adapter | File | Token Budget | Format | Write-Back |
 |---------|------|-------------|--------|------------|
-| Claude Code | `claude-code.ts` | 50,000 | markdown | CLI + file |
-| Cursor | `cursor.ts` | 8,000 | frontmatter | file |
-| GitHub Copilot | `copilot.ts` | 4,000 | markdown | file |
-| Aider | `aider.ts` | 20,000 | markdown | CLI |
-| Codex CLI | `codex.ts` | 20,000 | markdown | CLI + file |
-| OpenCode | `opencode.ts` | 20,000 | frontmatter | file |
-| Antigravity | `antigravity.ts` | 20,000 | toml | file |
-| OpenClaw | `openclaw.ts` | 20,000 | json | file |
-| Generic | `generic.ts` | 10,000 | json | file + stdout |
+| Claude Code | `claude-code.ts` | 200,000 | markdown | cli_command |
+| Cursor | `cursor.ts` | 32,000 | markdown | none |
+| GitHub Copilot | `copilot.ts` | 8,000 | markdown | none |
+| Aider | `aider.ts` | 100,000 | markdown | file_append |
+| Codex CLI | `codex.ts` | 128,000 | markdown | cli_command |
+| OpenCode | `opencode.ts` | 100,000 | markdown | file_append |
+| Antigravity | `antigravity.ts` | 1,000,000 | markdown | cli_command |
+| OpenClaw | `openclaw.ts` | 100,000 | markdown | file_append |
+| Generic | `generic.ts` | 10,000 | markdown | none |
 
 ## Security Constraints
 

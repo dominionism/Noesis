@@ -1,12 +1,12 @@
 /**
  * Format Bridges
  *
- * Transforms context between different adapter formats.
- * Each adapter may expect context in a specific format:
- * - Markdown (Claude Code, Codex, OpenCode, OpenClaw)
- * - TOML (Antigravity/Gemini CLI)
- * - Frontmatter YAML + Markdown (Cursor, Aider)
- * - JSON (Generic)
+ * Transforms context between different output formats.
+ *
+ * The bridge library still supports markdown, TOML, frontmatter, JSON,
+ * and plain text. The default shipped adapter registry currently maps all
+ * built-in adapters to markdown because their live transforms emit markdown
+ * instruction files.
  */
 
 // ===========================================================================
@@ -35,14 +35,14 @@ export interface FormattedOutput {
 
 const ADAPTER_FORMATS: Record<string, FormatType> = {
   'claude-code': 'markdown',
-  'cursor': 'frontmatter',
+  'cursor': 'markdown',
   'copilot': 'markdown',
-  'aider': 'frontmatter',
-  'codex': 'markdown',
+  'aider': 'markdown',
+  'codex-cli': 'markdown',
   'opencode': 'markdown',
-  'antigravity': 'toml',
+  'antigravity': 'markdown',
   'openclaw': 'markdown',
-  'generic': 'json',
+  'generic': 'markdown',
 };
 
 // ===========================================================================

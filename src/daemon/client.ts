@@ -258,7 +258,8 @@ export class NoesisClient {
     } catch (err) {
       // Daemon not running or not responding — proceed to spawn
       this.disconnect();
-      if (this.shouldUseLocalFallback(err)) {
+      // Only skip spawning if we know we can't spawn (e.g. sandbox permission denied)
+      if (this.isIpcPermissionDenied(err)) {
         this.localOnlyMode = true;
         return;
       }
@@ -435,6 +436,20 @@ export class NoesisClient {
     return this.call<RecallResult>('recall', params as Record<string, unknown>);
   }
 
+  getMemory(
+    id: string,
+    options?: { type?: string; project_id?: string },
+  ): Promise<Memory | null> {
+    const params: Record<string, unknown> = { id };
+    if (options?.type !== undefined) {
+      params.type = options.type;
+    }
+    if (options?.project_id !== undefined) {
+      params.project_id = options.project_id;
+    }
+    return this.call<Memory | null>('getMemory', params);
+  }
+
   remember(params: {
     type: string;
     title: string;
@@ -454,7 +469,7 @@ export class NoesisClient {
     if (projectId !== undefined) {
       params.project_id = projectId;
     }
-    return this.call<unknown>('retrieval_gap', params);
+    return this.call<unknown>('retrievalGap', params);
   }
 
   checkAction(action: string, projectId?: string): Promise<unknown> {
@@ -462,7 +477,7 @@ export class NoesisClient {
     if (projectId !== undefined) {
       params.project_id = projectId;
     }
-    return this.call<unknown>('check_action', params);
+    return this.call<unknown>('checkAction', params);
   }
 
   explain(memoryId: string, query: string, projectId?: string): Promise<unknown> {
@@ -481,7 +496,7 @@ export class NoesisClient {
     project_id?: string;
     agent?: string;
   }): Promise<{ session_id: string }> {
-    return this.call<{ session_id: string }>('session_start', params as Record<string, unknown>);
+    return this.call<{ session_id: string }>('sessionStart', params as Record<string, unknown>);
   }
 
   sessionEnd(sessionId: string, summary?: string): Promise<void> {
@@ -489,14 +504,14 @@ export class NoesisClient {
     if (summary !== undefined) {
       params.summary = summary;
     }
-    return this.call<void>('session_end', params);
+    return this.call<void>('sessionEnd', params);
   }
 
   sessionList(params?: {
     project_id?: string;
     limit?: number;
   }): Promise<Memory[]> {
-    return this.call<Memory[]>('session_list', params as Record<string, unknown> | undefined);
+    return this.call<Memory[]>('sessionList', params as Record<string, unknown> | undefined);
   }
 
   // -----------------------------------------------------------------------
@@ -691,6 +706,10 @@ export class NoesisClient {
     return this.call<unknown>('resumeHandoff', { handoff_id: handoffId });
   }
 
+  listHandoffs(params?: { project_id?: string; limit?: number }): Promise<unknown> {
+    return this.call<unknown>('listHandoffs', params as Record<string, unknown> | undefined);
+  }
+
   checkDecisionFidelity(action: string, projectId: string): Promise<unknown> {
     return this.call<unknown>('checkDecisionFidelity', {
       action,
@@ -724,6 +743,269 @@ export class NoesisClient {
 
   critiquePlan(work: string): Promise<unknown> {
     return this.call<unknown>('critiquePlan', { work });
+  }
+
+  // -----------------------------------------------------------------------
+  // Typed convenience methods — Intelligence operations
+  // -----------------------------------------------------------------------
+
+  clusterMemories(params: {
+    project_id?: string;
+    min_cluster_size?: number;
+    max_clusters?: number;
+  }): Promise<unknown> {
+    return this.call<unknown>('clusterMemories', params as Record<string, unknown>);
+  }
+
+  synthesizeSkill(params: {
+    project_id?: string;
+    min_occurrences?: number;
+  }): Promise<unknown> {
+    return this.call<unknown>('synthesizeSkill', params as Record<string, unknown>);
+  }
+
+  synthesizeAntiPattern(params: {
+    project_id?: string;
+    min_occurrences?: number;
+  }): Promise<unknown> {
+    return this.call<unknown>('synthesizeAntiPattern', params as Record<string, unknown>);
+  }
+
+  distillMemories(params: {
+    project_id?: string;
+    dry_run?: boolean;
+  }): Promise<unknown> {
+    return this.call<unknown>('distillMemories', params as Record<string, unknown>);
+  }
+
+  buildCodebaseMap(params: {
+    root_path: string;
+    project_id?: string;
+  }): Promise<unknown> {
+    return this.call<unknown>('buildCodebaseMap', params as Record<string, unknown>);
+  }
+
+  buildWorldModel(params: {
+    project_id?: string;
+  }): Promise<unknown> {
+    return this.call<unknown>('buildWorldModel', params as Record<string, unknown>);
+  }
+
+  getCognitiveProfile(params: {
+    project_id?: string;
+  }): Promise<unknown> {
+    return this.call<unknown>('getCognitiveProfile', params as Record<string, unknown>);
+  }
+
+  updateCognitiveProfile(params: {
+    action: 'correction' | 'preference' | 'style';
+    project_id?: string;
+    correction?: { expected: string; actual: string; context: string };
+    preference?: { key: string; value: string; category: string };
+    style?: { dimension: string; value: number };
+  }): Promise<unknown> {
+    return this.call<unknown>('updateCognitiveProfile', params as Record<string, unknown>);
+  }
+
+  selfEvaluate(params: {
+    project_id?: string;
+  }): Promise<unknown> {
+    return this.call<unknown>('selfEvaluate', params as Record<string, unknown>);
+  }
+
+  computeIntelligenceMetrics(params: {
+    totalRetrievals: number;
+    helpfulRetrievals: number;
+    totalGateChecks: number;
+    gatesPassed: number;
+    totalFailures: number;
+    lessonsCaptured: number;
+    skillsSynthesizedLast30Days: number;
+    avgTimeCurrentPeriod: number;
+    avgTimePreviousPeriod: number;
+  }): Promise<unknown> {
+    return this.call<unknown>('computeIntelligenceMetrics', params as Record<string, unknown>);
+  }
+
+  analyzeProgress(params: {
+    project_id?: string;
+    task_description?: string;
+  }): Promise<unknown> {
+    return this.call<unknown>('analyzeProgress', params as Record<string, unknown>);
+  }
+
+  simulateStrategy(params: {
+    goal: string;
+    strategies: string[];
+    project_id?: string;
+  }): Promise<unknown> {
+    return this.call<unknown>('simulateStrategy', params as Record<string, unknown>);
+  }
+
+  planTask(params: {
+    task: string;
+    project_id?: string;
+  }): Promise<unknown> {
+    return this.call<unknown>('planTask', params as Record<string, unknown>);
+  }
+
+  routeModel(params: {
+    operation: string;
+    complexity?: string;
+    latency_sensitive?: boolean;
+  }): Promise<unknown> {
+    return this.call<unknown>('routeModel', params as Record<string, unknown>);
+  }
+
+  detectFriction(params: {
+    project_id?: string;
+  }): Promise<unknown> {
+    return this.call<unknown>('detectFriction', params as Record<string, unknown>);
+  }
+
+  distillTrace(params: {
+    trace: string;
+    project_id?: string;
+  }): Promise<unknown> {
+    return this.call<unknown>('distillTrace', params as Record<string, unknown>);
+  }
+
+  synthesizeExperience(params: {
+    project_id?: string;
+    session_id?: string;
+  }): Promise<unknown> {
+    return this.call<unknown>('synthesizeExperience', params as Record<string, unknown>);
+  }
+
+  selectCompute(params: {
+    task: string;
+    confidence?: number;
+  }): Promise<unknown> {
+    return this.call<unknown>('selectCompute', params as Record<string, unknown>);
+  }
+
+  checkVerification(params: {
+    task: string;
+    artifacts?: string[];
+  }): Promise<unknown> {
+    return this.call<unknown>('checkVerification', params as Record<string, unknown>);
+  }
+
+  updateConfidence(params: {
+    successes: number;
+    failures: number;
+    confidence: number;
+    outcome: 'success' | 'partial' | 'failure';
+    last_used_at?: string;
+  }): Promise<unknown> {
+    return this.call<unknown>('updateConfidence', params as Record<string, unknown>);
+  }
+
+  runBenchmark(params: {
+    action: 'create_task' | 'record_run' | 'compare' | 'report';
+    [key: string]: unknown;
+  }): Promise<unknown> {
+    return this.call<unknown>('runBenchmark', params as Record<string, unknown>);
+  }
+
+  // -----------------------------------------------------------------------
+  // Typed convenience methods — Workflow operations
+  // -----------------------------------------------------------------------
+
+  getAgentDefinitions(): Promise<unknown> {
+    return this.call<unknown>('getAgentDefinitions', {});
+  }
+
+  registerAgent(params: {
+    name: string;
+    description: string;
+    displayName?: string;
+    capabilities?: string[];
+    triggers?: string[];
+    constraints?: string[];
+    successCriteria?: string[];
+    priority?: number;
+    status?: 'active' | 'draft' | 'archived';
+  }): Promise<unknown> {
+    return this.call<unknown>('registerAgent', params as Record<string, unknown>);
+  }
+
+  createCheckpoint(params: {
+    type: 'human_verify' | 'decision' | 'human_action';
+    description: string;
+    context?: string;
+    options?: string[];
+  }): Promise<unknown> {
+    return this.call<unknown>('createCheckpoint', params as Record<string, unknown>);
+  }
+
+  resolveCheckpoint(id: string, resolution?: string): Promise<unknown> {
+    const params: Record<string, unknown> = { id };
+    if (resolution !== undefined) params.resolution = resolution;
+    return this.call<unknown>('resolveCheckpoint', params);
+  }
+
+  getPendingCheckpoints(): Promise<unknown> {
+    return this.call<unknown>('getPendingCheckpoints', {});
+  }
+
+  createDebugSession(trigger: string): Promise<unknown> {
+    return this.call<unknown>('createDebugSession', { trigger });
+  }
+
+  updateDebugSession(params: {
+    action: string;
+    session: Record<string, unknown>;
+    symptom?: string;
+    evidence?: string;
+    eliminated?: string;
+    focus?: { hypothesis: string; test: string; expecting: string; nextAction: string };
+    resolution?: string;
+    status?: string;
+  }): Promise<unknown> {
+    return this.call<unknown>('updateDebugSession', params as Record<string, unknown>);
+  }
+
+  trackDeviation(params: {
+    rule: 1 | 2 | 3 | 4;
+    type: string;
+    description: string;
+    task_id: string;
+  }): Promise<unknown> {
+    return this.call<unknown>('trackDeviation', params as Record<string, unknown>);
+  }
+
+  getDeviations(taskId?: string): Promise<unknown> {
+    const params: Record<string, unknown> = {};
+    if (taskId !== undefined) params.task_id = taskId;
+    return this.call<unknown>('getDeviations', params);
+  }
+
+  createWorkflowPlan(params: {
+    goal: string;
+    context?: string;
+    constraints?: string[];
+    deliverable?: string;
+    validation?: string[];
+    project_id?: string;
+  }): Promise<unknown> {
+    return this.call<unknown>('createWorkflowPlan', params as Record<string, unknown>);
+  }
+
+  optimizePrompt(prompt: string, projectId?: string): Promise<unknown> {
+    const params: Record<string, unknown> = { prompt };
+    if (projectId !== undefined) params.project_id = projectId;
+    return this.call<unknown>('optimizePrompt', params);
+  }
+
+  verifyArtifact(params: {
+    artifact: string;
+    description?: string;
+    expected_patterns?: string[];
+    expected_imports?: string[];
+    root_path?: string;
+  }): Promise<unknown> {
+    return this.call<unknown>('verifyArtifact', params as Record<string, unknown>);
   }
 
   // -----------------------------------------------------------------------

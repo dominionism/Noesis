@@ -5,7 +5,7 @@
  * method registry. Separated from rpc.ts to keep the core handler
  * manageable and cognitive concerns isolated.
  *
- * 23 methods covering: orchestration, rules, experts, capsules, skills,
+ * 26 methods covering: orchestration, rules, experts, capsules, skills,
  * contexts, gates, learning, execution, sessions, handoffs, decisions,
  * verification, and critic.
  *
@@ -18,9 +18,10 @@
 
 import { createHash } from 'node:crypto';
 import type { DatabaseConnection } from '../core/database.js';
-import type { Memory, PromptShape, HandoffInput } from '../types.js';
+import type { EmbeddingProvider, Memory, PromptShape, HandoffInput, SecretMatch } from '../types.js';
 import type {
   SignFn,
+  MemorySignFn,
   RuleDefinition,
   RuleCategory,
   ComplianceContext,
@@ -117,6 +118,10 @@ function optionalBoolean(params: Record<string, unknown>, key: string): boolean 
 export interface CognitiveRpcDependencies {
   db: DatabaseConnection;
   sign: SignFn;
+  signMemory: MemorySignFn;
+  embeddingProvider: EmbeddingProvider;
+  verifySignature: (memory: Memory) => { valid: boolean; tampered: boolean };
+  scanSecrets: (text: string) => { clean: string; redacted: boolean; matches: SecretMatch[] };
   writeAuditLog: (entry: Omit<import('../types.js').AuditEntry, 'timestamp'>) => void;
 }
 
@@ -135,7 +140,7 @@ export function registerCognitiveMethods(
   methods: Map<string, MethodHandler>,
   deps: CognitiveRpcDependencies,
 ): void {
-  const { db, sign, writeAuditLog } = deps;
+  const { db, sign, signMemory, embeddingProvider, verifySignature, scanSecrets, writeAuditLog } = deps;
 
   // =========================================================================
   // 1. orchestrate — Full cognitive orchestration
@@ -162,10 +167,10 @@ export function registerCognitiveMethods(
     try {
       const result = await hybridRetrieve({
         db,
-        embeddingProvider: null as never, // Fallback: BM25-only if no embeddings
+        embeddingProvider,
         recallParams: { query: request, project_id: projectId ?? undefined, limit: 10 },
-        verifySignature: () => ({ valid: true, tampered: false }),
-        scanSecrets: (text: string) => ({ clean: text, redacted: false, matches: [] }),
+        verifySignature,
+        scanSecrets,
       });
       memories = result.memories;
     } catch {
@@ -365,6 +370,19 @@ export function registerCognitiveMethods(
   methods.set('noesis.getContexts', async (params) => {
     const projectId = optionalString(params, 'project_id') ?? null;
     const types = optionalStringArray(params, 'types');
+    const useEconomist = params.use_economist === true;
+    const tokenBudget = typeof params.token_budget === 'number' ? params.token_budget : 50000;
+
+    if (useEconomist) {
+      // Value-based allocation via context-economist
+      const { assembleContextsWithEconomist } = await import('../cognitive/context/context-engine.js');
+      const result = assembleContextsWithEconomist(db, projectId, tokenBudget);
+      if (types && types.length > 0) {
+        const typeSet = new Set(types);
+        result.contexts = result.contexts.filter(c => typeSet.has(c.context_type));
+      }
+      return result;
+    }
 
     const { listContexts } = await import('../cognitive/context/context-store.js');
 
@@ -510,7 +528,61 @@ export function registerCognitiveMethods(
   });
 
   // =========================================================================
-  // 10. predictFailures — Predictive failure detection
+  // 10. getEffectivenessMetrics — Gate effectiveness metrics
+  // =========================================================================
+
+  methods.set('noesis.getEffectivenessMetrics', async (params) => {
+    type EffectivenessGate = 'readiness' | 'output_quality' | 'verification';
+    const isEffectivenessGate = (value: string): value is EffectivenessGate =>
+      value === 'readiness' || value === 'output_quality' || value === 'verification';
+
+    const requestedGate = optionalString(params, 'gate_type');
+
+    if (requestedGate && !isEffectivenessGate(requestedGate)) {
+      throw new CognitiveRpcError(
+        ERROR_INVALID_PARAMS,
+        `noesis.getEffectivenessMetrics: unsupported gate_type "${requestedGate}"`,
+      );
+    }
+
+    const {
+      getEffectivenessMetrics,
+      getCrossSubsystemEffectiveness,
+      suggestAdjustment,
+    } = await import('../cognitive/learning/effectiveness-tracker.js');
+
+    if (requestedGate) {
+      const gateType = requestedGate as EffectivenessGate;
+      const metrics = getEffectivenessMetrics(db, gateType);
+      return {
+        gate_type: gateType,
+        metrics,
+        suggestion: suggestAdjustment(metrics),
+      };
+    }
+
+    const summary = getCrossSubsystemEffectiveness(db);
+    return {
+      gates: {
+        readiness: {
+          metrics: summary.readiness,
+          suggestion: suggestAdjustment(summary.readiness),
+        },
+        output_quality: {
+          metrics: summary.output_quality,
+          suggestion: suggestAdjustment(summary.output_quality),
+        },
+        verification: {
+          metrics: summary.verification,
+          suggestion: suggestAdjustment(summary.verification),
+        },
+      },
+      overall: summary.overall,
+    };
+  });
+
+  // =========================================================================
+  // 11. predictFailures — Predictive failure detection
   // =========================================================================
 
   methods.set('noesis.predictFailures', async (params) => {
@@ -539,7 +611,7 @@ export function registerCognitiveMethods(
   });
 
   // =========================================================================
-  // 11. processLearning — Multi-target learning writeback
+  // 12. processLearning — Multi-target learning writeback
   // =========================================================================
 
   methods.set('noesis.processLearning', async (params) => {
@@ -565,6 +637,7 @@ export function registerCognitiveMethods(
       ruleIds: optionalStringArray(params, 'rule_ids'),
       memoryIds: optionalStringArray(params, 'memory_ids'),
       projectId: optionalString(params, 'project_id') ?? null,
+      dryRun: optionalBoolean(params, 'dry_run') ?? false,
     }, sign);
 
     eventBus.emit({
@@ -588,32 +661,39 @@ export function registerCognitiveMethods(
   });
 
   // =========================================================================
-  // 12. createGsdProject — Create GSD execution project
+  // 13. createGsdProject — Create GSD execution project
   // =========================================================================
 
   methods.set('noesis.createGsdProject', async (params) => {
     const projectId = requireString(params, 'project_id', 'noesis.createGsdProject');
     const description = requireString(params, 'description', 'noesis.createGsdProject');
+    const planId = optionalString(params, 'plan_id') ?? null;
 
     const { createExecution } = await import('../cognitive/execution/gsd-engine.js');
 
     const state: ExecutionState = createExecution(db, {
       project_id: projectId,
       milestone: optionalString(params, 'milestone') ?? description,
+      plan_id: planId,
     });
 
     writeAuditLog({
       event_type: 'COGNITIVE_WRITE',
       content_hash: auditHash(projectId + description),
       source: 'system',
-      details: { method: 'noesis.createGsdProject', project_id: projectId, execution_id: state.id },
+      details: {
+        method: 'noesis.createGsdProject',
+        project_id: projectId,
+        execution_id: state.id,
+        plan_id: planId,
+      },
     });
 
     return state;
   });
 
   // =========================================================================
-  // 13. executeGsdPhase — Execute GSD phase transition
+  // 14. executeGsdPhase — Execute GSD phase transition
   // =========================================================================
 
   methods.set('noesis.executeGsdPhase', async (params) => {
@@ -664,7 +744,7 @@ export function registerCognitiveMethods(
   });
 
   // =========================================================================
-  // 14. getGsdState — Get execution state
+  // 15. getGsdState — Get execution state
   // =========================================================================
 
   methods.set('noesis.getGsdState', async (params) => {
@@ -680,7 +760,7 @@ export function registerCognitiveMethods(
   });
 
   // =========================================================================
-  // 15. startSessionCognitive — Start session with cognitive context
+  // 16. startSessionCognitive — Start session with cognitive context
   // =========================================================================
 
   methods.set('noesis.startSessionCognitive', async (params) => {
@@ -712,7 +792,7 @@ export function registerCognitiveMethods(
   });
 
   // =========================================================================
-  // 16. createHandoff — Create rich handoff
+  // 17. createHandoff — Create rich handoff
   // =========================================================================
 
   methods.set('noesis.createHandoff', async (params) => {
@@ -735,7 +815,7 @@ export function registerCognitiveMethods(
       memory_refs: memoryRefs ?? [],
     };
 
-    const handoff = createHandoff(db, input, projectId, sign);
+    const handoff = await createHandoff(db, input, projectId, signMemory, embeddingProvider);
 
     eventBus.emit({
       type: 'handoff_created',
@@ -758,7 +838,7 @@ export function registerCognitiveMethods(
   });
 
   // =========================================================================
-  // 17. resumeHandoff — Resume from handoff with context
+  // 18. resumeHandoff — Resume from handoff with context
   // =========================================================================
 
   methods.set('noesis.resumeHandoff', async (params) => {
@@ -779,7 +859,22 @@ export function registerCognitiveMethods(
   });
 
   // =========================================================================
-  // 18. checkDecisionFidelity — Decision fidelity check
+  // 19. listHandoffs — List persisted handoffs
+  // =========================================================================
+
+  methods.set('noesis.listHandoffs', async (params) => {
+    const projectId = optionalString(params, 'project_id') ?? null;
+    const limit = optionalNumber(params, 'limit');
+
+    const { listHandoffs } = await import('../cognitive/continuity/handoff-manager.js');
+
+    return {
+      handoffs: listHandoffs(db, projectId, limit),
+    };
+  });
+
+  // =========================================================================
+  // 20. checkDecisionFidelity — Decision fidelity check
   // =========================================================================
 
   methods.set('noesis.checkDecisionFidelity', async (params) => {
@@ -794,7 +889,7 @@ export function registerCognitiveMethods(
   });
 
   // =========================================================================
-  // 19. listRules — List rules
+  // 21. listRules — List rules
   // =========================================================================
 
   methods.set('noesis.listRules', async (params) => {
@@ -811,7 +906,7 @@ export function registerCognitiveMethods(
   });
 
   // =========================================================================
-  // 20. listExperts — List experts
+  // 22. listExperts — List experts
   // =========================================================================
 
   methods.set('noesis.listExperts', async (params) => {
@@ -828,7 +923,7 @@ export function registerCognitiveMethods(
   });
 
   // =========================================================================
-  // 21. listCapsules — List deep capsules
+  // 23. listCapsules — List deep capsules
   // =========================================================================
 
   methods.set('noesis.listCapsules', async (params) => {
@@ -843,7 +938,7 @@ export function registerCognitiveMethods(
   });
 
   // =========================================================================
-  // 22. detectVerification — Detect verification capabilities
+  // 24. detectVerification — Detect verification capabilities
   // =========================================================================
 
   methods.set('noesis.detectVerification', async (params) => {
@@ -859,37 +954,53 @@ export function registerCognitiveMethods(
   });
 
   // =========================================================================
-  // 23. critiqueResearch / critiquePlan — Enhanced critic
+  // 25. critiqueResearch / critiquePlan — Enhanced critic
   // =========================================================================
 
   methods.set('noesis.critiqueResearch', async (params) => {
     const work = requireString(params, 'work', 'noesis.critiqueResearch');
 
-    const { critiqueResearch } = await import('../workflow/enhanced-critic.js');
+    const maxIterations = optionalNumber(params, 'max_iterations') ?? 1;
+    const { critiqueResearch, iterateCritique } = await import('../workflow/enhanced-critic.js');
 
-    return critiqueResearch({
+    const input: import('../workflow/enhanced-critic.js').EnhancedCriticInput = {
       work,
       type: 'research',
       antiPatterns: [],
       memories: [],
-    });
+    };
+
+    let result = critiqueResearch(input);
+    while (result.revisionNeeded && result.iterationCount < maxIterations) {
+      result = iterateCritique(input, result, maxIterations);
+    }
+
+    return result;
   });
 
   methods.set('noesis.critiquePlan', async (params) => {
     const work = requireString(params, 'work', 'noesis.critiquePlan');
 
-    const { critiquePlan } = await import('../workflow/enhanced-critic.js');
+    const maxIterations = optionalNumber(params, 'max_iterations') ?? 1;
+    const { critiquePlan, iterateCritique } = await import('../workflow/enhanced-critic.js');
 
-    return critiquePlan({
+    const input: import('../workflow/enhanced-critic.js').EnhancedCriticInput = {
       work,
       type: 'plan',
       antiPatterns: [],
       memories: [],
-    });
+    };
+
+    let result = critiquePlan(input);
+    while (result.revisionNeeded && result.iterationCount < maxIterations) {
+      result = iterateCritique(input, result, maxIterations);
+    }
+
+    return result;
   });
 
   // =========================================================================
-  // 24. learn — Run basic pattern detection on recent memories
+  // 26. learn — Run basic pattern detection on recent memories
   // =========================================================================
 
   methods.set('noesis.learn', async (params) => {

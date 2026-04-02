@@ -13,7 +13,9 @@
  * - Standard JSON-RPC 2.0 error codes are used throughout.
  * - Methods that call existing modules (recall, remember, forget, etc.)
  *   are wired to actual implementations via dependency injection.
- * - Workflow methods that do not exist yet return { status: 'not_implemented' }.
+ * - Socket-specific features such as event subscriptions rely on optional
+ *   transport dependencies; without them, those RPCs degrade cleanly instead
+ *   of pretending the transport exists.
  * - An idle timer reset callback is exported so the server can track activity.
  *
  * Security:
@@ -47,8 +49,11 @@ import { analyzeGap } from '../retrieval/gap-analysis.js';
 import { checkAction } from '../retrieval/action-advisory.js';
 import { explainRetrieval } from '../retrieval/explain.js';
 import { executeWritePipeline } from '../memory/write-pipeline.js';
+import { runRuntimeSync } from '../sync/sync-orchestrator.js';
 import { eventBus } from './events.js';
 import { registerCognitiveMethods } from './rpc-cognitive.js';
+import { registerIntelligenceMethods } from './rpc-intelligence.js';
+import { registerWorkflowMethods } from './rpc-workflow.js';
 
 // ---------------------------------------------------------------------------
 // JSON-RPC 2.0 types
@@ -137,6 +142,15 @@ export interface RpcDependencies {
 
   /** Count unresolved conflicts (for gap analysis). */
   getUnresolvedConflictCount: (projectId?: string) => number;
+
+  /** Optional socket-backed event subscription transport. */
+  subscribeEvents?: (subscriptionId: string | number, events: string[]) => Promise<void> | void;
+
+  /** Optional socket-backed event unsubscription transport. */
+  unsubscribeEvents?: (subscriptionId: string | number) => Promise<boolean> | boolean;
+
+  /** Optional LLM provider for intelligence modules (skill synthesis, etc.). */
+  llmProvider?: import('../intelligence/skill-synthesis.js').LlmProvider;
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +215,13 @@ function optionalNumber(params: Record<string, unknown>, key: string): number | 
   return value;
 }
 
+function optionalBoolean(params: Record<string, unknown>, key: string): boolean | undefined {
+  const value = params[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'boolean') return undefined;
+  return value;
+}
+
 function optionalStringArray(params: Record<string, unknown>, key: string): string[] | undefined {
   const value = params[key];
   if (value === undefined || value === null) return undefined;
@@ -257,6 +278,27 @@ function registerMethods(deps: RpcDependencies): Map<string, MethodHandler> {
     }
 
     return retrieve(recallParams);
+  });
+
+  methods.set('noesis.getMemory', async (params) => {
+    const id = requireString(params, 'id', 'noesis.getMemory');
+    const expectedType = optionalString(params, 'type');
+    const expectedProjectId = optionalString(params, 'project_id');
+
+    const memory = deps.getMemory(id);
+    if (!memory) {
+      return null;
+    }
+
+    if (expectedType && memory.type !== expectedType) {
+      return null;
+    }
+
+    if (expectedProjectId !== undefined && memory.project_id !== expectedProjectId) {
+      return null;
+    }
+
+    return memory;
   });
 
   methods.set('noesis.remember', async (params) => {
@@ -372,6 +414,7 @@ function registerMethods(deps: RpcDependencies): Map<string, MethodHandler> {
     const projectId = optionalString(params, 'project_id');
     const agent = optionalString(params, 'agent') ?? 'unknown';
     const now = new Date().toISOString();
+    const sessionId = deps.generateId();
 
     const sessionContent = JSON.stringify({
       agent,
@@ -384,7 +427,7 @@ function registerMethods(deps: RpcDependencies): Map<string, MethodHandler> {
     });
 
     const signature = deps.signMemory({
-      id: 'pending',
+      id: sessionId,
       type: 'session',
       title: `Session: ${agent}`,
       content: sessionContent,
@@ -400,7 +443,7 @@ function registerMethods(deps: RpcDependencies): Map<string, MethodHandler> {
       scope: projectId ? 'project' : 'global',
       source: 'system',
       signature,
-    });
+    }, sessionId);
 
     eventBus.emit({
       type: 'memory_written',
@@ -477,53 +520,61 @@ function registerMethods(deps: RpcDependencies): Map<string, MethodHandler> {
   });
 
   // =========================================================================
-  // Sync methods (placeholders)
+  // Sync methods
   // =========================================================================
 
   methods.set('noesis.sync', async (params) => {
     const adapterId = optionalString(params, 'adapter_id');
     const projectId = optionalString(params, 'project_id');
+    const projectRoot = optionalString(params, 'project_root');
+    const dryRun = optionalBoolean(params, 'dry_run') ?? false;
+    const force = optionalBoolean(params, 'force') ?? false;
 
-    // Retrieve current memories for the project (or all)
-    const memories = listMemories(deps.db, {
-      project_id: projectId,
-      limit: 500,
-    });
-
-    if (memories.length === 0) {
-      return {
-        status: 'no_data',
-        adapter_id: adapterId ?? null,
-        project_id: projectId ?? null,
-        message: 'No memories to sync',
-        memories_count: 0,
-      };
+    if (!projectRoot && !projectId) {
+      throw new RpcError(
+        ERROR_INVALID_PARAMS,
+        'noesis.sync: requires "project_root" or "project_id"',
+      );
     }
 
-    // Build a universal context from current memories
-    const contextEntries = memories.map((m) => ({
-      id: m.id,
-      type: m.type,
-      title: m.title,
-      project_id: m.project_id,
-      scope: m.scope,
-      created_at: m.created_at,
-      updated_at: m.updated_at,
-    }));
+    const adapterFilter =
+      adapterId && adapterId !== 'all'
+        ? [adapterId]
+        : undefined;
 
-    // If a specific adapter is requested, filter or tag accordingly
-    const syncPlan = {
-      adapter_id: adapterId ?? 'all',
-      project_id: projectId ?? null,
-      memories_count: memories.length,
-      entries: contextEntries,
-    };
+    const result = await runRuntimeSync(
+      {
+        db: deps.db,
+        embeddingProvider: deps.embeddingProvider,
+        verifySignature: deps.verifySignature,
+        scanSecrets: deps.scanSecrets,
+        signMemory: deps.signMemory,
+        scanAndRedact: deps.scanAndRedact,
+        checkDangerousPatterns: deps.checkDangerousPatterns,
+        writeAuditLog: deps.writeAuditLog,
+        emitEvent: (event: NoesisEvent) => eventBus.emit(event),
+        generateId: deps.generateId,
+      },
+      {
+        adapterFilter,
+        projectRoot,
+        projectId: projectId ?? null,
+        dryRun,
+        force,
+      },
+    );
 
     return {
-      status: 'ok',
-      adapter_id: adapterId ?? null,
-      project_id: projectId ?? null,
-      sync_plan: syncPlan,
+      ...result,
+      adapter_id: adapterId ?? 'all',
+      project_id: result.projectId,
+      project_root: result.projectRoot,
+      plan_id: result.planId,
+      total_files_written: result.totalFilesWritten,
+      total_tokens_injected: result.totalTokensInjected,
+      total_errors: result.totalErrors,
+      duration_ms: result.durationMs,
+      completed_at: result.completedAt,
     };
   });
 
@@ -540,9 +591,25 @@ function registerMethods(deps: RpcDependencies): Map<string, MethodHandler> {
       );
     }
 
-    // Placeholder: real subscription over the socket is Phase 2
+    const requestedId = params['subscription_id'];
+    const subscriptionId =
+      typeof requestedId === 'string' || typeof requestedId === 'number'
+        ? requestedId
+        : deps.generateId();
+
+    if (!deps.subscribeEvents) {
+      return {
+        status: 'not_implemented',
+        subscription_id: subscriptionId,
+        subscribed_events: events,
+      };
+    }
+
+    await deps.subscribeEvents(subscriptionId, events);
+
     return {
-      status: 'not_implemented',
+      status: 'subscribed',
+      subscription_id: subscriptionId,
       subscribed_events: events,
     };
   });
@@ -556,9 +623,17 @@ function registerMethods(deps: RpcDependencies): Map<string, MethodHandler> {
       );
     }
 
-    // Placeholder: real unsubscription over the socket is Phase 2
+    if (!deps.unsubscribeEvents) {
+      return {
+        status: 'not_implemented',
+        subscription_id: subscriptionId,
+      };
+    }
+
+    const unsubscribed = await deps.unsubscribeEvents(subscriptionId as string | number);
+
     return {
-      status: 'ok',
+      status: unsubscribed ? 'unsubscribed' : 'not_found',
       subscription_id: subscriptionId,
     };
   });
@@ -577,7 +652,27 @@ function registerMethods(deps: RpcDependencies): Map<string, MethodHandler> {
       project_id: null,
     });
 
-  registerCognitiveMethods(methods, { db: deps.db, sign: signFn, writeAuditLog: deps.writeAuditLog });
+  registerCognitiveMethods(methods, {
+    db: deps.db,
+    sign: signFn,
+    signMemory: deps.signMemory,
+    embeddingProvider: deps.embeddingProvider,
+    verifySignature: deps.verifySignature,
+    scanSecrets: deps.scanSecrets,
+    writeAuditLog: deps.writeAuditLog,
+  });
+
+  registerIntelligenceMethods(methods, {
+    db: deps.db,
+    embeddingProvider: deps.embeddingProvider,
+    writeAuditLog: deps.writeAuditLog,
+    llmProvider: deps.llmProvider,
+  });
+
+  registerWorkflowMethods(methods, {
+    db: deps.db,
+    writeAuditLog: deps.writeAuditLog,
+  });
 
   return methods;
 }

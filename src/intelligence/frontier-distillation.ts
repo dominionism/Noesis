@@ -5,8 +5,7 @@
  * trace and convert it into rules, skills, anti-patterns, and retrieval anchors
  * that cheaper models can use on similar tasks later.
  *
- * ABILITIES.md Improvement #7: Distill frontier-model work into reusable
- * organizational intelligence.
+ * Converts strong-model traces into reusable organizational intelligence.
  *
  * Research basis: Voyager (Wang et al., 2023), DSPy (Khattab et al., 2023),
  * Sub-goal Distillation (Hashemzadeh et al., 2024).

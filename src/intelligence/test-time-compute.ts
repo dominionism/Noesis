@@ -5,7 +5,7 @@
  * use extra system-level compute: generate multiple candidate solutions,
  * verify them, rank them, and select the best.
  *
- * ABILITIES.md Improvement #6: Add selective test-time compute.
+ * Adds selective extra computation for hard tasks.
  *
  * Research basis: Self-Consistency (Wang et al., 2022),
  * Tree of Thoughts (Yao et al., 2023), s1 (Muennighoff et al., 2025).

@@ -5,7 +5,7 @@
  * These are not load tests — they verify single-operation performance
  * to catch regressions.
  *
- * Targets from INTELLIGENCE.md:
+ * Benchmark targets for the cognitive architecture:
  *   Rule matching (14 rules):         < 10ms
  *   Expert routing (37 experts):      < 15ms
  *   Capsule matching (7 capsules):    < 5ms

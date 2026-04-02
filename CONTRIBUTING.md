@@ -6,7 +6,7 @@ Thank you for your interest in contributing to Noesis. This document covers the 
 
 ### Prerequisites
 
-- Node.js >= 20
+- Node.js 24.x (`24.7.0` is pinned in `.nvmrc` and `.node-version`)
 - npm >= 10
 - macOS or Linux (POSIX file permissions required)
 
@@ -15,6 +15,7 @@ Thank you for your interest in contributing to Noesis. This document covers the 
 ```bash
 git clone https://github.com/<org>/noesis.git
 cd noesis
+# Load the pinned Node 24.x runtime before running npm commands.
 npm install
 npm run build
 npm test
@@ -119,7 +120,7 @@ Contributions that weaken, bypass, or disable any invariant will be rejected.
 
 ### Testing
 
-- **Framework:** vitest with `pool: forks`, `singleFork: true`
+- **Framework:** vitest with `pool: forks`, `fileParallelism: false`
 - **Pattern:** Write tests before or alongside implementation
 - **Coverage focus:** Behavior-focused tests covering happy path, edge cases, and failure cases
 - **Database tests:** Use in-memory SQLite (`:memory:`)
