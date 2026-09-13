@@ -166,7 +166,8 @@ describe('Invariant 2: Secret scanning cannot be disabled', () => {
   });
 
   it('detects generic API keys', () => {
-    const matches = scanForSecrets('api_key = "sk_live_abcdefghijklmnopqrstuvwxyz"');
+    const fakeApiKey = ['sk', 'live', 'abcdefghijklmnopqrstuvwxyz'].join('_');
+    const matches = scanForSecrets(`api_key = "${fakeApiKey}"`);
     expect(matches.length).toBeGreaterThan(0);
   });
 
