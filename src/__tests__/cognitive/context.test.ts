@@ -267,6 +267,19 @@ describe('Context Engine', () => {
       expect(totalTokens).toBe(0);
     });
 
+    it('does not treat overlapping HTML comments as substantive context', () => {
+      const { db } = setup();
+      upsertContext(db, {
+        context_type: 'state',
+        content: '## Project Status\n<!<!-- hidden -->-->',
+      }, sign);
+
+      const { contexts, totalTokens } = assembleContexts(db, null, 10000);
+
+      expect(contexts).toHaveLength(0);
+      expect(totalTokens).toBe(0);
+    });
+
     it('keeps populated contexts while dropping placeholder-only templates', () => {
       const { db } = setup();
       seedBuiltInContexts(db, sign);

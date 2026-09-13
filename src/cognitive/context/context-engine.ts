@@ -633,8 +633,26 @@ function extractTriggerFromTitle(title: string): string {
   return trimmed.slice(separator + 1).trim();
 }
 
+function stripHtmlComments(content: string): string {
+  let stripped = content;
+
+  while (true) {
+    const start = stripped.indexOf('<!--');
+    if (start === -1) {
+      return stripped;
+    }
+
+    const end = stripped.indexOf('-->', start + 4);
+    if (end === -1) {
+      return stripped.slice(0, start);
+    }
+
+    stripped = stripped.slice(0, start) + stripped.slice(end + 3);
+  }
+}
+
 function hasRenderableContextBody(content: string): boolean {
-  const withoutComments = content.replace(/<!--[\s\S]*?-->/g, '');
+  const withoutComments = stripHtmlComments(content);
 
   for (const line of withoutComments.split('\n')) {
     const trimmed = line.trim();

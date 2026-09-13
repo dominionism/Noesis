@@ -56,6 +56,17 @@ describe('transformToFormat', () => {
     expect(result.content).toContain('priority = ');
   });
 
+  it('roundtrips TOML content containing backslashes, quotes, and newlines', () => {
+    const content = 'C:\\temp\\new "quoted"\nnext';
+    const formatted = transformToFormat([
+      { title: 'Paths', content, priority: 1, tokens: 8 },
+    ], 'toml');
+
+    const [parsed] = parseFromFormat(formatted.content, 'toml');
+
+    expect(parsed.content).toBe(content);
+  });
+
   it('transforms to frontmatter', () => {
     const result = transformToFormat(makeSections(), 'frontmatter');
     expect(result.format).toBe('frontmatter');
