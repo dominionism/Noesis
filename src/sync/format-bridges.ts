@@ -130,8 +130,7 @@ function toMarkdown(sections: ContextSection[]): string {
 
 function toTOML(sections: ContextSection[]): string {
   return sections.map((s) => {
-    const escaped = s.content.replace(/"/g, '\\"').replace(/\n/g, '\\n');
-    return `[${sanitizeTomlKey(s.title)}]\ncontent = "${escaped}"\npriority = ${s.priority}`;
+    return `[${sanitizeTomlKey(s.title)}]\ncontent = ${JSON.stringify(s.content)}\npriority = ${s.priority}`;
   }).join('\n\n');
 }
 
@@ -188,11 +187,17 @@ function parseTOML(content: string): ContextSection[] {
 
   for (const block of blocks) {
     const titleMatch = block.match(/^\[(.+)]/);
-    const contentMatch = block.match(/content\s*=\s*"(.+)"/);
+    const contentMatch = block.match(/content\s*=\s*("(?:\\.|[^"\\])*")/);
     const priorityMatch = block.match(/priority\s*=\s*(\d+)/);
 
     if (titleMatch && contentMatch) {
-      const text = contentMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"');
+      let text: string;
+      try {
+        text = JSON.parse(contentMatch[1]) as string;
+      } catch {
+        continue;
+      }
+
       sections.push({
         title: titleMatch[1],
         content: text,
